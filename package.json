@@ -1,0 +1,15 @@
+{
+  "name": "conclusionsearch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "deploy": "node scripts/deploy-cloudflare.mjs",
+    "test": "node tests/catalog-workflow.mjs && node tests/alias-workflow.mjs && node tests/refresh-workflow.mjs",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}

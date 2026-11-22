@@ -1,0 +1,9 @@
+import fs from 'node:fs';import {createHash} from 'node:crypto';
+const moduleSource='const digest=async s=>{const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,"0")).join("");};\n'+fs.readFileSync('worker/catalog.js','utf8')+'\nexport {normalizeFlower,normalizeSweet,normalizeCat,matchCatalog};';
+const {normalizeFlower,normalizeSweet,normalizeCat,matchCatalog}=await import('data:text/javascript;base64,'+Buffer.from(moduleSource).toString('base64'));
+const read=p=>JSON.parse(fs.readFileSync(p,'utf8')),at=new Date().toISOString();
+const flower=read('/tmp/flower-data.json'),reviews=read('/tmp/flower-reviews.json'),sweet=read('/tmp/sweet-live.json')[0],cat=read('/tmp/cat-data.json'),stats=read('/tmp/cat-stats.json');
+const seed={a:{records:await normalizeFlower(flower,reviews,at),successAt:at,sourceUpdatedAt:flower.generated},b:{records:normalizeSweet(sweet.data,at),successAt:at,sourceUpdatedAt:sweet.updated_at},c:{records:normalizeCat(cat,stats,at),successAt:at,sourceUpdatedAt:null}};
+fs.writeFileSync('source-seed.json',JSON.stringify(seed));const catalog=matchCatalog(seed);fs.writeFileSync('catalog.json',JSON.stringify(catalog));const counts={};for(const r of catalog)counts[r.autoGroup]=(counts[r.autoGroup]||0)+1;
+console.log(JSON.stringify({sources:Object.fromEntries(Object.entries(seed).map(([k,v])=>[k,v.records.length])),records:catalog.length,groups:Object.keys(counts).length,multiSourceGroups:Object.values(counts).filter(n=>n>1).length,ratings:Object.fromEntries(Object.entries(seed).map(([k,v])=>[k,v.records.filter(r=>r.score).length]))}));
+const legacy=catalog.filter(r=>['ceo','agent','c-2400','c-2382'].includes(r.id));console.log(legacy.map(r=>({id:r.id,group:r.autoGroup,title:r.title,en:r.en,score:r.score})));

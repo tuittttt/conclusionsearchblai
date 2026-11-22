@@ -1,0 +1,4 @@
+CREATE TABLE link_clicks (
+  link_id TEXT PRIMARY KEY NOT NULL,
+  clicks INTEGER NOT NULL DEFAULT 0
+);

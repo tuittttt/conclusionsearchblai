@@ -1,0 +1,17 @@
+{
+  "name": "conclusionsearch",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "conclusionsearch",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 4,10,16,22 * * *"
+    ]
+  }
+}
