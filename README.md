@@ -47,7 +47,7 @@ node tests/alias-workflow.mjs
 ## 部署到自己的 Cloudflare（不使用 AI 云任务）
 
 1. Cloudflare 中打开 Workers & Pages，创建应用并连接此 GitHub 仓库。
-2. 项目名使用 `conclusionsearch`，构建命令填 `npm run build`，部署命令填 `npm run deploy`。
+2. 项目名使用 `conclusionsearchblai`，构建命令填 `npm run build`，部署命令填 `npm run deploy`。
 3. Wrangler 会自动创建 D1，部署脚本随后执行数据库迁移。等整个流程成功后再打开网址。
 4. 第一次打开网站时，点击「手动更新数据」检查三站状态。
 
