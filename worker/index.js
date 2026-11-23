@@ -1,6 +1,7 @@
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 export default {async fetch(request,env){
  const url=new URL(request.url);
+ if(Object.hasOwn(PUBLIC_FILES,url.pathname)){if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});return new Response(request.method==='HEAD'?null:PUBLIC_FILES[url.pathname],{headers:{'content-type':'text/plain; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});}
  if(url.pathname==='/source-code.zip'){const bytes=Uint8Array.from(atob(SOURCE_ZIP),c=>c.charCodeAt(0));return new Response(bytes,{headers:{'content-type':'application/zip','content-disposition':'attachment; filename=conclusionsearch-source.zip','cache-control':'public, max-age=300'}});}
  if(url.pathname==='/api/catalog'){try{return json(await getCatalog(env));}catch(error){console.error('catalog read failed');return json({error:'目录暂时不可用'},503);}}
  if(url.pathname==='/api/refresh-status'){try{return json(await refreshStatus(env));}catch{return json({error:'同步状态暂不可用'},503);}}
