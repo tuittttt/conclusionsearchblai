@@ -10,29 +10,30 @@ function displayNames(title,en=''){
  return {title:zh,en,aliases:aliases.length>1?aliases:[]};
 }
 const scoreValue=(score,count)=>Number(count)>0&&Number(score)>=.5&&Number(score)<=5?[Math.round(Number(score)*10)/10,Number(count)]:null;
+function preciseTime(value){if(typeof value==='number')return Number.isFinite(value)&&value>0?value:null;if(typeof value==='string'&&value.includes('T')){const n=Date.parse(value);return Number.isFinite(n)?n:null;}return null;}
 async function normalizeFlower(raw,reviews,fetchedAt){
  if(!Array.isArray(raw.items)||!Array.isArray(reviews.reviews)||!reviews.ready||reviews.stale)throw Error('目录或评分未准备好');
  const scores=new Map();for(const r of reviews.reviews){if(Number(r.rating)<.5||Number(r.rating)>5)continue;const k=keyName(r.drama),s=scores.get(k)||[0,0];s[0]+=Number(r.rating);s[1]++;scores.set(k,s);}
- return Promise.all(raw.items.filter(x=>x.title).map(async x=>{
+ return Promise.all(raw.items.filter(x=>x.title).map(async (x,sourceOrder)=>{
   const names=displayNames(x.title),legacy=keyName(names.en)===keyName("The CEO's Manservant")?'ceo':keyName(names.en)===keyName('Signed By My Dangerous Agent')?'agent':null;
   const stable=String(x.image||'').match(/[a-f0-9]{8}-[a-f0-9-]{27,}/i)?.[0]||(await digest(x.title)).slice(0,24);
   const id=legacy||'a-'+stable,s=scores.get(keyName(x.title));
-  return {id,...names,source:'a',sourceId:String(x.title),sourceTitle:x.title,date:x.date||null,type:'AI剧',tags:[],cover:safeURL(x.thumbnail||x.image,SOURCE_URLS.a),score:s?scoreValue(s[0]/s[1],s[1]):null,url:SOURCE_URLS.a+'drama.html?title='+encodeURIComponent(x.title)+'&drama='+encodeURIComponent(x.title),linkKey:(legacy||id)+'-a',resources:Object.entries(x.links||{}).map(([label,url])=>({label,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'a',sourceId:String(x.title),sourceTitle:x.title,date:x.date||null,sortAt:preciseTime(x.updated_at)||preciseTime(x.added_at),sourceOrder,type:'AI剧',tags:[],cover:safeURL(x.thumbnail||x.image,SOURCE_URLS.a),score:s?scoreValue(s[0]/s[1],s[1]):null,url:SOURCE_URLS.a+'drama.html?title='+encodeURIComponent(x.title)+'&drama='+encodeURIComponent(x.title),linkKey:(legacy||id)+'-a',resources:Object.entries(x.links||{}).map(([label,url])=>({label,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
  }));
 }
 function normalizeSweet(raw,fetchedAt){
  if(!Array.isArray(raw))throw Error('目录格式不正确');
- return raw.filter(x=>!x._deleted&&x.id&&x.title).map(x=>{
+ return raw.filter(x=>!x._deleted&&x.id&&x.title).map((x,sourceOrder)=>{
   const names=displayNames(x.title,x.enTitle),id='b-'+x.id;
-  return {id,...names,source:'b',sourceId:String(x.id),sourceTitle:String(x.title),date:x.addedAt||null,type:'',tags:[...(x.tags||[]),...(x.styles||[])],cover:SOURCE_URLS.b.split('?')[0]+'posters/'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp?sharecode=4PXWFRMYGU',score:scoreValue(x.rating,x.votes),url:SOURCE_URLS.b,linkKey:id+'-b',resources:(x.links||[]).map(l=>({label:l.platform||'资源',url:safeURL(l.url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'b',sourceId:String(x.id),sourceTitle:String(x.title),date:x.addedAt||null,sortAt:preciseTime(x.updatedAt)||preciseTime(x.createdAt)||preciseTime(x.addedAt),sourceOrder,type:'',tags:[...(x.tags||[]),...(x.styles||[])],cover:SOURCE_URLS.b.split('?')[0]+'posters/'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp?sharecode=4PXWFRMYGU',score:scoreValue(x.rating,x.votes),url:SOURCE_URLS.b,linkKey:id+'-b',resources:(x.links||[]).map(l=>({label:l.platform||'资源',url:safeURL(l.url)})).filter(r=>r.url),fetchedAt};
  });
 }
 function normalizeCat(raw,stats,fetchedAt){
  if(!raw.ok||!Array.isArray(raw.items)||!stats.ok||!stats.stats)throw Error('目录或评分格式不正确');
- return raw.items.filter(x=>x.id&&x.name).map(x=>{
+ return raw.items.filter(x=>x.id&&x.name).map((x,sourceOrder)=>{
   const names=displayNames(x.name,x.sub),id='c-'+x.id,legacy=Number(x.id)===2400?'ceo':Number(x.id)===2382?'agent':null,s=stats.stats[String(x.id)];
   const cover=x.posterBlob?SOURCE_URLS.c+'api/poster/'+x.id+'?v='+encodeURIComponent(x.posterVer||'20261119a'):x.posterFile?SOURCE_URLS.c+'posters_tn/'+encodeURIComponent(x.posterFile)+'?v=20261119a':null;
-  return {id,...names,source:'c',sourceId:String(x.id),sourceTitle:x.name,date:x.created_at?new Date(x.created_at).toISOString().slice(0,10):null,type:{ai:'AI剧',short:'真人短剧',long:'长剧'}[x.type]||x.type||'',tags:[x.genre,x.country,x.year].filter(Boolean),cover,score:s?scoreValue(s.avg,s.count):null,url:SOURCE_URLS.c+'?drama='+x.id,linkKey:(legacy||id)+'-c',resources:Object.entries(x.links||{}).filter(([k])=>k!=='pwd').map(([key,url])=>({label:({baidu:'百度网盘',uc:'UC网盘',quark:'夸克网盘',xunlei:'迅雷网盘'})[key]||key,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'c',sourceId:String(x.id),sourceTitle:x.name,date:x.created_at?new Date(x.created_at).toISOString().slice(0,10):null,sortAt:preciseTime(x.updated_at)||preciseTime(x.created_at),sourceOrder,type:{ai:'AI剧',short:'真人短剧',long:'长剧'}[x.type]||x.type||'',tags:[x.genre,x.country,x.year].filter(Boolean),cover,score:s?scoreValue(s.avg,s.count):null,url:SOURCE_URLS.c+'?drama='+x.id,linkKey:(legacy||id)+'-c',resources:Object.entries(x.links||{}).filter(([k])=>k!=='pwd').map(([key,url])=>({label:({baidu:'百度网盘',uc:'UC网盘',quark:'夸克网盘',xunlei:'迅雷网盘'})[key]||key,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
  });
 }
 function matchCatalog(snapshots){
