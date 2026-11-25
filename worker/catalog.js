@@ -11,14 +11,16 @@ function displayNames(title,en=''){
 }
 const scoreValue=(score,count)=>Number(count)>0&&Number(score)>=.5&&Number(score)<=5?[Math.round(Number(score)*10)/10,Number(count)]:null;
 function preciseTime(value){if(typeof value==='number')return Number.isFinite(value)&&value>0?value:null;if(typeof value==='string'&&value.includes('T')){const n=Date.parse(value);return Number.isFinite(n)?n:null;}return null;}
-async function normalizeFlower(raw,reviews,fetchedAt){
- if(!Array.isArray(raw.items)||!Array.isArray(reviews.reviews)||!reviews.ready||reviews.stale)throw Error('目录或评分未准备好');
- const scores=new Map();for(const r of reviews.reviews){if(Number(r.rating)<.5||Number(r.rating)>5)continue;const k=keyName(r.drama),s=scores.get(k)||[0,0];s[0]+=Number(r.rating);s[1]++;scores.set(k,s);}
+async function normalizeFlower(raw,reviews,fetchedAt,previous=[]){
+ if(!Array.isArray(raw.items))throw Error('目录格式不正确');
+ const ratingsReady=Array.isArray(reviews?.reviews)&&reviews.ready&&!reviews.stale;
+ const previousScores=new Map(previous.map(r=>[keyName(r.sourceTitle),r.score]));
+ const scores=new Map();for(const r of ratingsReady?reviews.reviews:[]){if(Number(r.rating)<.5||Number(r.rating)>5)continue;const k=keyName(r.drama),s=scores.get(k)||[0,0];s[0]+=Number(r.rating);s[1]++;scores.set(k,s);}
  return Promise.all(raw.items.filter(x=>x.title).map(async (x,sourceOrder)=>{
   const names=displayNames(x.title),legacy=keyName(names.en)===keyName("The CEO's Manservant")?'ceo':keyName(names.en)===keyName('Signed By My Dangerous Agent')?'agent':null;
   const stable=String(x.image||'').match(/[a-f0-9]{8}-[a-f0-9-]{27,}/i)?.[0]||(await digest(x.title)).slice(0,24);
   const id=legacy||'a-'+stable,s=scores.get(keyName(x.title));
-  return {id,...names,source:'a',sourceId:String(x.title),sourceTitle:x.title,date:x.date||null,sortAt:preciseTime(x.updated_at)||preciseTime(x.added_at),sourceOrder,type:'AI剧',tags:[],cover:safeURL(x.thumbnail||x.image,SOURCE_URLS.a),score:s?scoreValue(s[0]/s[1],s[1]):null,url:SOURCE_URLS.a+'drama.html?title='+encodeURIComponent(x.title)+'&drama='+encodeURIComponent(x.title),linkKey:(legacy||id)+'-a',resources:Object.entries(x.links||{}).map(([label,url])=>({label,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'a',sourceId:String(x.title),sourceTitle:x.title,date:x.date||null,sortAt:preciseTime(x.updated_at)||preciseTime(x.added_at),sourceOrder,type:'AI剧',tags:[],cover:safeURL(x.thumbnail||x.image,SOURCE_URLS.a),score:ratingsReady?(s?scoreValue(s[0]/s[1],s[1]):null):(previousScores.get(keyName(x.title))||null),url:SOURCE_URLS.a+'drama.html?title='+encodeURIComponent(x.title)+'&drama='+encodeURIComponent(x.title),linkKey:(legacy||id)+'-a',resources:Object.entries(x.links||{}).map(([label,url])=>({label,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
  }));
 }
 function normalizeSweet(raw,fetchedAt){
@@ -55,18 +57,18 @@ async function getCatalog(env,force=false){
  const snapshots=structuredClone(SEED),statuses=await env.DB.prepare('SELECT * FROM source_status').all();
  for(const status of statuses.results){const chunks=await env.DB.prepare('SELECT payload FROM source_snapshots WHERE source=? AND revision=? ORDER BY chunk_index').bind(status.source,status.active_revision).all();if(chunks.results.length)snapshots[status.source]={records:chunks.results.flatMap(c=>JSON.parse(c.payload)),successAt:status.success_at,sourceUpdatedAt:status.source_updated_at,error:status.error,attemptAt:status.attempt_at};}
  const items=matchCatalog(snapshots),groups=new Set(items.map(r=>r.autoGroup));
- const value={items,meta:{sourceRecordCount:items.length,dramaCount:groups.size,sources:['a','b','c'].map(source=>({source,name:SOURCE_NAMES[source],count:snapshots[source]?.records.length||0,successAt:snapshots[source]?.successAt||null,sourceUpdatedAt:snapshots[source]?.sourceUpdatedAt||null,error:snapshots[source]?.error||null})),schedule:null}};
+ const value={items,meta:{sourceRecordCount:items.length,dramaCount:groups.size,sources:['a','b','c'].map(source=>({source,name:SOURCE_NAMES[source],count:snapshots[source]?.records.length||0,successAt:snapshots[source]?.successAt||null,sourceUpdatedAt:snapshots[source]?.sourceUpdatedAt||null,warning:snapshots[source]?.error?.startsWith('评分暂不可用')?snapshots[source].error:null,error:snapshots[source]?.error?.startsWith('评分暂不可用')?null:(snapshots[source]?.error||null)})),schedule:null}};
  liveCatalogCache={time:Date.now(),value};return value;
 }
 function catalogRoutes(items){const routes={'source-a':SOURCE_URLS.a,'source-b':SOURCE_URLS.b,'source-c':SOURCE_URLS.c};for(const r of items){routes[r.linkKey]=r.url;r.resources.forEach((link,i)=>routes[r.linkKey+'-resource-'+i]=link.url);}return routes;}
 async function fetchSource(url,asText=false,headers={}){const response=await fetch(url,{headers:{accept:asText?'text/html':'application/json',...headers},signal:AbortSignal.timeout(20000)});if(!response.ok)throw Error('来源返回 HTTP '+response.status);return asText?response.text():response.json();}
-async function fetchSourceSnapshot(source){const fetchedAt=new Date().toISOString();
- if(source==='a'){const [raw,reviews]=await Promise.all([fetchSource(SOURCE_URLS.a+'data.json'),fetchSource('https://api.cloudofflower.ccwu.cc/reviews')]);return {records:await normalizeFlower(raw,reviews,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:raw.generated};}
+async function fetchSourceSnapshot(source,previous=[]){const fetchedAt=new Date().toISOString();
+ if(source==='a'){const [raw,reviews]=await Promise.all([fetchSource(SOURCE_URLS.a+'data.json'),fetchSource('https://api.cloudofflower.ccwu.cc/reviews').catch(()=>null)]);const ratingsReady=Array.isArray(reviews?.reviews)&&reviews.ready&&!reviews.stale;return {records:await normalizeFlower(raw,reviews,fetchedAt,previous),warning:ratingsReady?null:'评分暂不可用：目录已更新，已有评分沿用上次数据，新剧暂无评分',successAt:fetchedAt,sourceUpdatedAt:raw.generated};}
  if(source==='b'){const html=await fetchSource(SOURCE_URLS.b,true),key=html.match(/publishableKey:"([^"]+)"/)?.[1];if(!key)throw Error('来源页面结构已变更');const raw=await fetchSource('https://tiandumanfen.app.workbuddy.host/.cloud/database/rest/drama_library?select=data,updated_at&id=eq.main',false,{'x-wb-webapp-access-key':key});if(!Array.isArray(raw)||!raw[0]?.data)throw Error('来源数据未准备好');return {records:normalizeSweet(raw[0].data,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:raw[0].updated_at};}
  const [raw,stats]=await Promise.all([fetchSource(SOURCE_URLS.c+'api/dramas'),fetchSource(SOURCE_URLS.c+'api/stats?all=1')]);return {records:normalizeCat(raw,stats,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:null};
 }
 async function refreshStatus(env){const run=await env.DB.prepare('SELECT * FROM refresh_runs ORDER BY started_at DESC LIMIT 1').first();return {lastRun:run?{startedAt:run.started_at,finishedAt:run.finished_at,status:run.status,summary:run.summary?JSON.parse(run.summary):null}:null,nextAllowedAt:run?new Date((Number(run.slot)+1)*3600000).toISOString():null};}
-async function storeSnapshot(env,source,snapshot){const revision=crypto.randomUUID(),statements=[];for(let i=0;i<snapshot.records.length;i+=50)statements.push(env.DB.prepare('INSERT INTO source_snapshots (source,revision,chunk_index,payload) VALUES (?,?,?,?)').bind(source,revision,i/50,JSON.stringify(snapshot.records.slice(i,i+50))));statements.push(env.DB.prepare('INSERT INTO source_status (source,active_revision,success_at,attempt_at,source_updated_at,error) VALUES (?,?,?,?,?,NULL) ON CONFLICT(source) DO UPDATE SET active_revision=excluded.active_revision,success_at=excluded.success_at,attempt_at=excluded.attempt_at,source_updated_at=excluded.source_updated_at,error=NULL').bind(source,revision,snapshot.successAt,snapshot.successAt,snapshot.sourceUpdatedAt));await env.DB.batch(statements);await env.DB.prepare('DELETE FROM source_snapshots WHERE source=? AND revision<>?').bind(source,revision).run();}
+async function storeSnapshot(env,source,snapshot){const revision=crypto.randomUUID(),statements=[];for(let i=0;i<snapshot.records.length;i+=50)statements.push(env.DB.prepare('INSERT INTO source_snapshots (source,revision,chunk_index,payload) VALUES (?,?,?,?)').bind(source,revision,i/50,JSON.stringify(snapshot.records.slice(i,i+50))));statements.push(env.DB.prepare('INSERT INTO source_status (source,active_revision,success_at,attempt_at,source_updated_at,error) VALUES (?,?,?,?,?,NULL) ON CONFLICT(source) DO UPDATE SET active_revision=excluded.active_revision,success_at=excluded.success_at,attempt_at=excluded.attempt_at,source_updated_at=excluded.source_updated_at,error=NULL').bind(source,revision,snapshot.successAt,snapshot.successAt,snapshot.sourceUpdatedAt));if(snapshot.warning)statements.push(env.DB.prepare('UPDATE source_status SET error=? WHERE source=?').bind(snapshot.warning,source));await env.DB.batch(statements);await env.DB.prepare('DELETE FROM source_snapshots WHERE source=? AND revision<>?').bind(source,revision).run();}
 async function refreshCatalog(request,env){
  if(request.method!=='POST')return json({error:'需要 POST'},405);
  // Policy: anonymous same-site visitors may refresh only these fixed public sources, at most once per hour sitewide.
@@ -79,9 +81,10 @@ async function runCatalogRefresh(env){
  const lock=await env.DB.prepare("INSERT OR IGNORE INTO refresh_runs (slot,started_at,status) VALUES (?,?,'running')").bind(slot,new Date(now).toISOString()).run();
  if(!lock.meta?.changes)return json({status:'already_started',message:'本时段已执行或正在执行，请读取目录更新时间确认'});
  const existing=await env.DB.prepare('SELECT source FROM source_status').all();for(const source of ['a','b','c'])if(!existing.results.some(r=>r.source===source))await storeSnapshot(env,source,SEED[source]);
+ const previousCatalog=await getCatalog(env,true);
  const results=await Promise.allSettled(['a','b','c'].map(async source=>{
-  const snapshot=await fetchSourceSnapshot(source);const prev=(await getCatalog(env)).meta.sources.find(s=>s.source===source);if(!snapshot.records.length||prev.count&&snapshot.records.length<prev.count*.5)throw Error('记录数异常减少，保留旧数据');
-  await storeSnapshot(env,source,snapshot);return {source,count:snapshot.records.length};
+  const snapshot=await fetchSourceSnapshot(source,previousCatalog.items.filter(r=>r.source===source));const prev=previousCatalog.meta.sources.find(s=>s.source===source);if(!snapshot.records.length||prev.count&&snapshot.records.length<prev.count*.5)throw Error('记录数异常减少，保留旧数据');
+  await storeSnapshot(env,source,snapshot);return {source,count:snapshot.records.length,warning:snapshot.warning||null};
  }));
  const summary=[];for(let i=0;i<results.length;i++){const source=['a','b','c'][i],r=results[i];if(r.status==='fulfilled')summary.push({...r.value,ok:true});else{const error=String(r.reason?.message||'同步失败').slice(0,180);await env.DB.prepare('UPDATE source_status SET attempt_at=?,error=? WHERE source=?').bind(new Date().toISOString(),error,source).run();summary.push({source,ok:false,error});}}
  const status=summary.every(r=>r.ok)?'succeeded':summary.some(r=>r.ok)?'partial':'failed';await env.DB.prepare('UPDATE refresh_runs SET status=?,finished_at=?,summary=? WHERE slot=?').bind(status,new Date().toISOString(),JSON.stringify(summary),slot).run();liveCatalogCache=null;return json({status,sources:summary,meta:(await getCatalog(env,true)).meta},status==='failed'?502:200);

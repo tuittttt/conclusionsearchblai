@@ -25,6 +25,19 @@ const options={method:'POST',headers:{origin:base,cookie:'drama_visitor=11111111
 let r=await call('/api/refresh',options);assert.equal(r.status,200);const result=await r.json();assert.equal(result.status,'partial');assert.equal(result.sources.find(r=>r.source==='b').ok,false);
 const catalog=await (await call('/api/catalog')).json();assert.equal(catalog.items.filter(r=>r.source==='b').length,830);assert.ok(catalog.meta.sources.find(s=>s.source==='b').error);assert.equal(catalog.meta.sourceRecordCount,3716);
 const calls=fetchCount;r=await call('/api/refresh',options);assert.equal((await r.json()).status,'already_started');assert.equal(fetchCount,calls);
+// A ratings outage must not block new catalog entries or erase existing scores.
+const scored=catalog.items.find(r=>r.source==='a'&&r.score);assert.ok(scored);
+sql({statements:[{sql:'DELETE FROM refresh_runs'}]});
+const healthyFetch=globalThis.fetch;
+globalThis.fetch=async url=>{if(String(url).endsWith('/reviews'))return Response.json({error:'评价服务暂时不可用'});const response=await healthyFetch(url);if(String(url).endsWith('/data.json')){const body=await response.json();body.items.push({title:'新增回归测试剧 New Regression Drama',date:'2026-11-25'});return Response.json(body);}return response;};
+r=await call('/api/refresh',options);const degraded=await r.json();assert.equal(degraded.sources.find(s=>s.source==='a').ok,true);assert.ok(degraded.sources.find(s=>s.source==='a').warning);
+const updated=await (await call('/api/catalog')).json();const a=updated.items.filter(r=>r.source==='a');assert.equal(a.length,seed.a.records.length+1);assert.deepEqual(a.find(r=>r.sourceTitle===scored.sourceTitle).score,scored.score);assert.equal(a.find(r=>r.sourceTitle.includes('New Regression Drama')).score,null);assert.ok(updated.meta.sources.find(s=>s.source==='a').warning);assert.equal(updated.meta.sources.find(s=>s.source==='a').error,null);
+// Network failures use the same fallback, while recovery replaces old scores.
+sql({statements:[{sql:'DELETE FROM refresh_runs'}]});globalThis.fetch=async url=>{if(String(url).endsWith('/reviews'))throw Error('timeout');return healthyFetch(url);};
+assert.equal((await (await call('/api/refresh',options)).json()).sources.find(s=>s.source==='a').ok,true);
+sql({statements:[{sql:'DELETE FROM refresh_runs'}]});globalThis.fetch=healthyFetch;
+assert.equal((await (await call('/api/refresh',options)).json()).sources.find(s=>s.source==='a').warning,null);assert.equal((await (await call('/api/catalog')).json()).meta.sources.find(s=>s.source==='a').warning,null);
+console.log('PASS: ratings service errors and network failures preserve scores, new titles sync without fabricated ratings, recovery clears warning');
 assert.equal((await call('/go/ceo-c')).headers.get('location'),'https://mztj666.com/?drama=2400');const counts=await (await call('/api/counts')).json();assert.equal(counts.counts['ceo-c'],1);
 r=await call('/source-code.zip');const bytes=new Uint8Array(await r.arrayBuffer());assert.equal(bytes[0],0x50);assert.equal(bytes[1],0x4b);
 console.log('PASS: authorized same-site refresh, atomic snapshots, failed-source preservation, 3716 records retained, global hourly cooldown, legacy redirect/count, open-source download');
