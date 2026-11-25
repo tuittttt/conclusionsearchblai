@@ -1,5 +1,5 @@
 const SOURCE_NAMES={a:'在云的背面种花',b:'甜度满分小剧院',c:'喵仔的剧集库'};
-const SOURCE_URLS={a:'https://aishort.cloudofflowers.com/',b:'https://tiandumanfen.app.workbuddy.host/?sharecode=4PXWFRMYGU',c:'https://mztj666.com/'};
+const SOURCE_URLS={a:'https://aishort.cloudofflowers.com/',b:'https://www.tdmf.top/',c:'https://mztj666.com/'};
 const keyName=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/[’‘]/g,"'").replace(/[\p{P}\p{Z}\s]/gu,'');
 function safeURL(raw,base){if(typeof raw!=='string'||!raw.trim())return null;try{const u=new URL(raw,base);return u.protocol==='https:'?u.href:null;}catch{return null;}}
 function displayNames(title,en=''){
@@ -27,7 +27,7 @@ function normalizeSweet(raw,fetchedAt){
  if(!Array.isArray(raw))throw Error('目录格式不正确');
  return raw.filter(x=>!x._deleted&&x.id&&x.title).map((x,sourceOrder)=>{
   const names=displayNames(x.title,x.enTitle),id='b-'+x.id;
-  return {id,...names,source:'b',sourceId:String(x.id),sourceTitle:String(x.title),date:x.addedAt||null,sortAt:preciseTime(x.updatedAt)||preciseTime(x.createdAt)||preciseTime(x.addedAt),sourceOrder,type:'',tags:[...(x.tags||[]),...(x.styles||[])],cover:SOURCE_URLS.b.split('?')[0]+'posters/'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp?sharecode=4PXWFRMYGU',score:scoreValue(x.rating,x.votes),url:SOURCE_URLS.b,linkKey:id+'-b',resources:(x.links||[]).map(l=>({label:l.platform||'资源',url:safeURL(l.url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'b',sourceId:String(x.id),sourceTitle:String(x.title),date:x.addedAt||null,sortAt:preciseTime(x.updatedAt)||preciseTime(x.createdAt)||preciseTime(x.addedAt),sourceOrder,type:'',tags:[...(x.tags||[]),...(x.styles||[])],cover:SOURCE_URLS.b.split('?')[0]+'posters/'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp',score:scoreValue(x.rating,x.votes),url:SOURCE_URLS.b,linkKey:id+'-b',resources:(x.links||[]).map(l=>({label:l.platform||'资源',url:safeURL(l.url)})).filter(r=>r.url),fetchedAt};
  });
 }
 function normalizeCat(raw,stats,fetchedAt){
@@ -56,6 +56,8 @@ async function getCatalog(env,force=false){
  if(!force&&liveCatalogCache&&Date.now()-liveCatalogCache.time<60000)return liveCatalogCache.value;
  const snapshots=structuredClone(SEED),statuses=await env.DB.prepare('SELECT * FROM source_status').all();
  for(const status of statuses.results){const chunks=await env.DB.prepare('SELECT payload FROM source_snapshots WHERE source=? AND revision=? ORDER BY chunk_index').bind(status.source,status.active_revision).all();if(chunks.results.length)snapshots[status.source]={records:chunks.results.flatMap(c=>JSON.parse(c.payload)),successAt:status.success_at,sourceUpdatedAt:status.source_updated_at,error:status.error,attemptAt:status.attempt_at};}
+ // Stored snapshots may still contain the retired WorkBuddy address.
+ for(const r of snapshots.b?.records||[]){r.url=SOURCE_URLS.b;r.cover=SOURCE_URLS.b+'posters/'+String(r.sourceId).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp';}
  const items=matchCatalog(snapshots),groups=new Set(items.map(r=>r.autoGroup));
  const value={items,meta:{sourceRecordCount:items.length,dramaCount:groups.size,sources:['a','b','c'].map(source=>({source,name:SOURCE_NAMES[source],count:snapshots[source]?.records.length||0,successAt:snapshots[source]?.successAt||null,sourceUpdatedAt:snapshots[source]?.sourceUpdatedAt||null,warning:snapshots[source]?.error?.startsWith('评分暂不可用')?snapshots[source].error:null,error:snapshots[source]?.error?.startsWith('评分暂不可用')?null:(snapshots[source]?.error||null)})),schedule:null}};
  liveCatalogCache={time:Date.now(),value};return value;
@@ -64,7 +66,7 @@ function catalogRoutes(items){const routes={'source-a':SOURCE_URLS.a,'source-b':
 async function fetchSource(url,asText=false,headers={}){const response=await fetch(url,{headers:{accept:asText?'text/html':'application/json',...headers},signal:AbortSignal.timeout(20000)});if(!response.ok)throw Error('来源返回 HTTP '+response.status);return asText?response.text():response.json();}
 async function fetchSourceSnapshot(source,previous=[]){const fetchedAt=new Date().toISOString();
  if(source==='a'){const [raw,reviews]=await Promise.all([fetchSource(SOURCE_URLS.a+'data.json'),fetchSource('https://api.cloudofflower.ccwu.cc/reviews').catch(()=>null)]);const ratingsReady=Array.isArray(reviews?.reviews)&&reviews.ready&&!reviews.stale;return {records:await normalizeFlower(raw,reviews,fetchedAt,previous),warning:ratingsReady?null:'评分暂不可用：目录已更新，已有评分沿用上次数据，新剧暂无评分',successAt:fetchedAt,sourceUpdatedAt:raw.generated};}
- if(source==='b'){const html=await fetchSource(SOURCE_URLS.b,true),key=html.match(/publishableKey:"([^"]+)"/)?.[1];if(!key)throw Error('来源页面结构已变更');const raw=await fetchSource('https://tiandumanfen.app.workbuddy.host/.cloud/database/rest/drama_library?select=data,updated_at&id=eq.main',false,{'x-wb-webapp-access-key':key});if(!Array.isArray(raw)||!raw[0]?.data)throw Error('来源数据未准备好');return {records:normalizeSweet(raw[0].data,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:raw[0].updated_at};}
+ if(source==='b'){const raw=await fetchSource(SOURCE_URLS.b+'api/select?table=drama_library&id=main');if(raw.error||!Array.isArray(raw.data?.data))throw Error('来源数据未准备好');return {records:normalizeSweet(raw.data.data,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:raw.data.updated_at};}
  const [raw,stats]=await Promise.all([fetchSource(SOURCE_URLS.c+'api/dramas'),fetchSource(SOURCE_URLS.c+'api/stats?all=1')]);return {records:normalizeCat(raw,stats,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:null};
 }
 async function refreshStatus(env){const run=await env.DB.prepare('SELECT * FROM refresh_runs ORDER BY started_at DESC LIMIT 1').first();return {lastRun:run?{startedAt:run.started_at,finishedAt:run.finished_at,status:run.status,summary:run.summary?JSON.parse(run.summary):null}:null,nextAllowedAt:run?new Date((Number(run.slot)+1)*3600000).toISOString():null};}
