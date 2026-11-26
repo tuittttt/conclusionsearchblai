@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const code=fs.readFileSync('worker/catalog.js','utf8');
+const {normalizeFlower}=await import('data:text/javascript;base64,'+Buffer.from("import {webcrypto} from 'node:crypto';const crypto=webcrypto;async function digest(s){return Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))).toString('hex');}\n"+code+'\nexport {normalizeFlower};').toString('base64'));
+const raw={items:[{title:'缓存剧集 Cached Drama',rating:'⭐ 观众评分：3.0 / 5（2条评分）'},{title:'目录剧集 Summary Drama',rating:'⭐ 观众评分：4.9 / 5（21条评分）'},{title:'历史剧集 Previous Drama'},{title:'新剧集 New Drama',rating:'⭐ 观众评分：暂无评分'}]};
+const previous=[{sourceTitle:'历史剧集 Previous Drama',score:[4.1,5]}];
+const reviews={ready:true,stale:true,reviews:[{drama:raw.items[0].title,rating:4},{drama:raw.items[0].title,rating:5}]};
+let rows=await normalizeFlower(raw,reviews,'now',previous);
+assert.deepEqual(rows.map(r=>r.score),[[4.5,2],[4.9,21],[4.1,5],null]);
+rows=await normalizeFlower(raw,null,'now',previous);assert.deepEqual(rows.map(r=>r.score),[[3,2],[4.9,21],[4.1,5],null]);
+rows=await normalizeFlower({items:[{title:raw.items[2].title}]},{ready:true,stale:false,reviews:[]},'now',previous);assert.equal(rows[0].score,null);
+console.log('PASS: stale upstream ratings remain usable, catalog summary fallback, previous score preservation, unrated titles and healthy empty reviews');
