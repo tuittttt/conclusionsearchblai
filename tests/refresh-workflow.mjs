@@ -24,7 +24,13 @@ assert.equal((await call('/api/refresh',{method:'POST',headers:{origin:'https://
 const options={method:'POST',headers:{origin:base,cookie:'drama_visitor=11111111-1111-4111-8111-111111111111'}};
 let r=await call('/api/refresh',options);assert.equal(r.status,200);const result=await r.json();assert.equal(result.status,'partial');assert.equal(result.sources.find(r=>r.source==='b').ok,false);
 const catalog=await (await call('/api/catalog')).json();assert.equal(catalog.items.filter(r=>r.source==='b').length,830);assert.ok(catalog.meta.sources.find(s=>s.source==='b').error);assert.equal(catalog.meta.sourceRecordCount,3716);
-const calls=fetchCount;r=await call('/api/refresh',options);assert.equal((await r.json()).status,'already_started');assert.equal(fetchCount,calls);
+let calls=fetchCount;r=await call('/api/refresh',options);assert.equal((await r.json()).status,'partial');assert.ok(fetchCount>calls);
+// A claim from another Worker blocks overlap, but abandoned claims expire.
+sql({statements:[{sql:"INSERT INTO refresh_runs(slot,started_at,status) VALUES ('other',?,'running')",args:[new Date().toISOString()]}]});
+calls=fetchCount;r=await call('/api/refresh',options);assert.equal((await r.json()).status,'already_started');assert.equal(fetchCount,calls);
+sql({statements:[{sql:"UPDATE refresh_runs SET started_at=? WHERE slot='other'",args:[new Date(Date.now()-360000).toISOString()]}]});
+assert.equal((await (await call('/api/refresh',options)).json()).status,'partial');
+assert.equal((await (await call('/api/refresh-status')).json()).nextAllowedAt,null);
 // New Sweet origin uses the site's public SQLite API and keeps stable click keys.
 const failingSweet=globalThis.fetch;
 sql({statements:[{sql:'DELETE FROM refresh_runs'}]});
@@ -47,5 +53,5 @@ assert.equal((await (await call('/api/refresh',options)).json()).sources.find(s=
 console.log('PASS: ratings service errors and network failures preserve scores, new titles sync without fabricated ratings, recovery clears warning');
 assert.equal((await call('/go/ceo-c')).headers.get('location'),'https://mztj666.com/?drama=2400');const counts=await (await call('/api/counts')).json();assert.equal(counts.counts['ceo-c'],1);
 r=await call('/source-code.zip');const bytes=new Uint8Array(await r.arrayBuffer());assert.equal(bytes[0],0x50);assert.equal(bytes[1],0x4b);
-console.log('PASS: authorized same-site refresh, atomic snapshots, failed-source preservation, 3716 records retained, global hourly cooldown, legacy redirect/count, open-source download');
+console.log('PASS: authorized same-site refresh, atomic snapshots, failed-source preservation, 3716 records retained, immediate repeat refresh, overlap lock and stale-lock recovery, legacy redirect/count, open-source download');
 }finally{globalThis.fetch=originalFetch;fs.rmSync(tmp,{recursive:true,force:true});}

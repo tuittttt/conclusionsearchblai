@@ -70,19 +70,21 @@ async function fetchSourceSnapshot(source,previous=[]){const fetchedAt=new Date(
  if(source==='b'){const raw=await fetchSource(SOURCE_URLS.b+'api/select?table=drama_library&id=main');if(raw.error||!Array.isArray(raw.data?.data))throw Error('来源数据未准备好');return {records:normalizeSweet(raw.data.data,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:raw.data.updated_at};}
  const [raw,stats]=await Promise.all([fetchSource(SOURCE_URLS.c+'api/dramas'),fetchSource(SOURCE_URLS.c+'api/stats?all=1')]);return {records:normalizeCat(raw,stats,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:null};
 }
-async function refreshStatus(env){const run=await env.DB.prepare('SELECT * FROM refresh_runs ORDER BY started_at DESC LIMIT 1').first();return {lastRun:run?{startedAt:run.started_at,finishedAt:run.finished_at,status:run.status,summary:run.summary?JSON.parse(run.summary):null}:null,nextAllowedAt:run?new Date((Number(run.slot)+1)*3600000).toISOString():null};}
+async function refreshStatus(env){const run=await env.DB.prepare('SELECT * FROM refresh_runs ORDER BY started_at DESC LIMIT 1').first();return {lastRun:run?{startedAt:run.started_at,finishedAt:run.finished_at,status:run.status,summary:run.summary?JSON.parse(run.summary):null}:null,nextAllowedAt:null};}
 async function storeSnapshot(env,source,snapshot){const revision=crypto.randomUUID(),statements=[];for(let i=0;i<snapshot.records.length;i+=50)statements.push(env.DB.prepare('INSERT INTO source_snapshots (source,revision,chunk_index,payload) VALUES (?,?,?,?)').bind(source,revision,i/50,JSON.stringify(snapshot.records.slice(i,i+50))));statements.push(env.DB.prepare('INSERT INTO source_status (source,active_revision,success_at,attempt_at,source_updated_at,error) VALUES (?,?,?,?,?,NULL) ON CONFLICT(source) DO UPDATE SET active_revision=excluded.active_revision,success_at=excluded.success_at,attempt_at=excluded.attempt_at,source_updated_at=excluded.source_updated_at,error=NULL').bind(source,revision,snapshot.successAt,snapshot.successAt,snapshot.sourceUpdatedAt));if(snapshot.warning)statements.push(env.DB.prepare('UPDATE source_status SET error=? WHERE source=?').bind(snapshot.warning,source));await env.DB.batch(statements);await env.DB.prepare('DELETE FROM source_snapshots WHERE source=? AND revision<>?').bind(source,revision).run();}
 async function refreshCatalog(request,env){
  if(request.method!=='POST')return json({error:'需要 POST'},405);
- // Policy: anonymous same-site visitors may refresh only these fixed public sources, at most once per hour sitewide.
+ // Policy: anonymous same-site visitors may refresh only these fixed public sources, only one refresh may run at a time sitewide.
  const origin=request.headers.get('origin');if(origin!=='https://drama-cross-search.eagertangerine4.chatgpt.site'&&origin!==new URL(request.url).origin)return json({error:'请从本站的更新按钮发起'},403);
  if(!/(?:^|;\s*)drama_visitor=[a-f0-9-]{36}(?:;|$)/.test(request.headers.get('cookie')||''))return json({error:'请先刷新网页再试，以取得访客更新权限'},401);
  return runCatalogRefresh(env);
 }
 async function runCatalogRefresh(env){
- const now=Date.now(),slot=String(Math.floor(now/3600000));
- const lock=await env.DB.prepare("INSERT OR IGNORE INTO refresh_runs (slot,started_at,status) VALUES (?,?,'running')").bind(slot,new Date(now).toISOString()).run();
- if(!lock.meta?.changes)return json({status:'already_started',message:'本时段已执行或正在执行，请读取目录更新时间确认'});
+ const now=Date.now(),slot=crypto.randomUUID();
+ // Atomic claim across Worker instances; abandoned runs expire after five minutes.
+ const lock=await env.DB.prepare("INSERT INTO refresh_runs (slot,started_at,status) SELECT ?,?,'running' WHERE NOT EXISTS (SELECT 1 FROM refresh_runs WHERE status='running' AND started_at>?)").bind(slot,new Date(now).toISOString(),new Date(now-300000).toISOString()).run();
+ if(!lock.meta?.changes)return json({status:'already_started',message:'已有更新正在进行，请稍候再试'});
+ try{
  const existing=await env.DB.prepare('SELECT source FROM source_status').all();for(const source of ['a','b','c'])if(!existing.results.some(r=>r.source===source))await storeSnapshot(env,source,SEED[source]);
  const previousCatalog=await getCatalog(env,true);
  const results=await Promise.allSettled(['a','b','c'].map(async source=>{
@@ -91,4 +93,5 @@ async function runCatalogRefresh(env){
  }));
  const summary=[];for(let i=0;i<results.length;i++){const source=['a','b','c'][i],r=results[i];if(r.status==='fulfilled')summary.push({...r.value,ok:true});else{const error=String(r.reason?.message||'同步失败').slice(0,180);await env.DB.prepare('UPDATE source_status SET attempt_at=?,error=? WHERE source=?').bind(new Date().toISOString(),error,source).run();summary.push({source,ok:false,error});}}
  const status=summary.every(r=>r.ok)?'succeeded':summary.some(r=>r.ok)?'partial':'failed';await env.DB.prepare('UPDATE refresh_runs SET status=?,finished_at=?,summary=? WHERE slot=?').bind(status,new Date().toISOString(),JSON.stringify(summary),slot).run();liveCatalogCache=null;return json({status,sources:summary,meta:(await getCatalog(env,true)).meta},status==='failed'?502:200);
+ }catch(error){await env.DB.prepare("UPDATE refresh_runs SET status='failed',finished_at=? WHERE slot=?").bind(new Date().toISOString(),slot).run();liveCatalogCache=null;throw error;}
 }
