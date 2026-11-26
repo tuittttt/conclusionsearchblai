@@ -1,4 +1,4 @@
-const APPROVAL_THRESHOLD=6;
+const APPROVAL_THRESHOLD=2;
 const normalizeName=s=>s.normalize('NFKC').replace(/[’‘]/g,"'").replace(/\s+/g,' ').trim().toLowerCase();
 const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 async function aliasEndpoint(request,env){
