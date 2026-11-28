@@ -1,5 +1,5 @@
-const SOURCE_NAMES={a:'在云的背面种花',b:'甜度满分小剧院',c:'喵仔的剧集库'};
-const SOURCE_URLS={a:'https://aishort.cloudofflowers.com/',b:'https://www.tdmf.top/',c:'https://mztj666.com/'};
+const SOURCE_NAMES={a:'在云的背面种花',b:'甜度满分小剧院',c:'喵仔的剧集库',d:'风停在第七页 · PageVII'};
+const SOURCE_URLS={a:'https://aishort.cloudofflowers.com/',b:'https://www.tdmf.top/',c:'https://mztj666.com/',d:'https://www.pagevii.com/'};
 const keyName=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/[’‘]/g,"'").replace(/[\p{P}\p{Z}\s]/gu,'');
 function safeURL(raw,base){if(typeof raw!=='string'||!raw.trim())return null;try{const u=new URL(raw,base);return u.protocol==='https:'?u.href:null;}catch{return null;}}
 function displayNames(title,en=''){
@@ -42,8 +42,15 @@ function normalizeCat(raw,stats,fetchedAt){
   return {id,...names,source:'c',sourceId:String(x.id),sourceTitle:x.name,date:x.created_at?new Date(x.created_at).toISOString().slice(0,10):null,sortAt:preciseTime(x.updated_at)||preciseTime(x.created_at),sourceOrder,type:{ai:'AI剧',short:'真人短剧',long:'长剧'}[x.type]||x.type||'',tags:cleanTags([x.genre,x.country,x.year,...cleanTags(x.tags)]),cover,score:s?scoreValue(s.avg,s.count):null,url:SOURCE_URLS.c+'?drama='+x.id,linkKey:(legacy||id)+'-c',resources:Object.entries(x.links||{}).filter(([k])=>k!=='pwd').map(([key,url])=>({label:({baidu:'百度网盘',uc:'UC网盘',quark:'夸克网盘',xunlei:'迅雷网盘'})[key]||key,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
  });
 }
+function normalizePageVII(raw,fetchedAt){
+ if(!Array.isArray(raw.dramas))throw Error('目录格式不正确');
+ return raw.dramas.filter(x=>x.id&&x.title&&x.published!==false).map((x,sourceOrder)=>{
+  const names=displayNames(x.title,x.titleEn),id='d-'+x.id,image=[...(x.portraitImages||[]),...(x.landscapeImages||[]),...(x.images||[])].find(k=>typeof k==='string'&&k);
+  return {id,...names,aliases:[...new Set([...names.aliases,...String(x.aliases||'').split(/[,，]/).map(t=>t.trim()).filter(Boolean)])],source:'d',sourceId:String(x.id),sourceTitle:x.title,date:x.publishDate||(preciseTime(x.createdAt)?new Date(x.createdAt).toISOString().slice(0,10):null),sortAt:preciseTime(x.listedAt)||preciseTime(x.createdAt),sourceOrder,type:'',tags:cleanTags([x.category,...cleanTags(x.tags)]),cover:image?SOURCE_URLS.d+'api/media?key='+encodeURIComponent(image):null,score:scoreValue(x.averageRating,x.ratingCount),url:SOURCE_URLS.d,linkKey:id+'-d',resources:Object.entries(x.links||{}).filter(([,l])=>l&&l.status!=='unavailable').map(([key,l])=>({label:({baidu:'百度网盘',quark:'夸克网盘',xunlei:'迅雷网盘',uc:'UC网盘'})[key]||key,url:safeURL(l.url)})).filter(l=>l.url),fetchedAt};
+ });
+}
 function matchCatalog(snapshots){
- const records=['a','b','c'].flatMap(s=>snapshots[s]?.records||[]),parents=new Map(records.map(r=>[r.id,r.id])),members=new Map(records.map(r=>[r.id,[r]]));
+ const records=['a','b','c','d'].flatMap(s=>snapshots[s]?.records||[]),parents=new Map(records.map(r=>[r.id,r.id])),members=new Map(records.map(r=>[r.id,[r]]));
  function find(id){let p=id;while(parents.get(p)!==p)p=parents.get(p);while(parents.get(id)!==id){const old=parents.get(id);parents.set(id,p);id=old;}return p;}
  function union(a,b,english){const x=find(a),y=find(b);if(x===y)return;const first=members.get(x),second=members.get(y);if(first.some(p=>second.some(q=>p.source===q.source)))return;
   if(!english){const e1=new Set(first.map(r=>keyName(r.en)).filter(Boolean)),e2=new Set(second.map(r=>keyName(r.en)).filter(Boolean));if(e1.size&&e2.size&&![...e1].some(e=>e2.has(e)))return;}
@@ -58,19 +65,20 @@ function matchCatalog(snapshots){
 let liveCatalogCache=null;
 async function getCatalog(env,force=false){
  if(!force&&liveCatalogCache&&Date.now()-liveCatalogCache.time<60000)return liveCatalogCache.value;
- const snapshots=structuredClone(SEED),statuses=await env.DB.prepare('SELECT * FROM source_status').all();
- for(const status of statuses.results){const chunks=await env.DB.prepare('SELECT payload FROM source_snapshots WHERE source=? AND revision=? ORDER BY chunk_index').bind(status.source,status.active_revision).all();if(chunks.results.length)snapshots[status.source]={records:chunks.results.flatMap(c=>JSON.parse(c.payload)),successAt:status.success_at,sourceUpdatedAt:status.source_updated_at,error:status.error,attemptAt:status.attempt_at};}
+ const snapshots=structuredClone(SEED);snapshots.d||={records:[],successAt:null};const statuses=await env.DB.prepare('SELECT * FROM source_status').all();
+ for(const status of statuses.results){const chunks=await env.DB.prepare('SELECT payload FROM source_snapshots WHERE source=? AND revision=? ORDER BY chunk_index').bind(status.source,status.active_revision).all();snapshots[status.source]={records:chunks.results.length?chunks.results.flatMap(c=>JSON.parse(c.payload)):(snapshots[status.source]?.records||[]),successAt:status.success_at,sourceUpdatedAt:status.source_updated_at,error:status.error,attemptAt:status.attempt_at};}
  // Stored snapshots may still contain the retired WorkBuddy address.
  for(const r of snapshots.b?.records||[]){r.url=SOURCE_URLS.b;r.cover=SOURCE_URLS.b+'posters/'+String(r.sourceId).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp';}
  const items=matchCatalog(snapshots),groups=new Set(items.map(r=>r.autoGroup));
- const value={items,meta:{sourceRecordCount:items.length,dramaCount:groups.size,sources:['a','b','c'].map(source=>({source,name:SOURCE_NAMES[source],count:snapshots[source]?.records.length||0,successAt:snapshots[source]?.successAt||null,sourceUpdatedAt:snapshots[source]?.sourceUpdatedAt||null,warning:snapshots[source]?.error?.match(/^(评分暂不可用|标签暂不可用)/)?snapshots[source].error:null,error:snapshots[source]?.error?.match(/^(评分暂不可用|标签暂不可用)/)?null:(snapshots[source]?.error||null)})),schedule:null}};
+ const value={items,meta:{sourceRecordCount:items.length,dramaCount:groups.size,sources:['a','b','c','d'].map(source=>({source,name:SOURCE_NAMES[source],count:snapshots[source]?.records.length||0,successAt:snapshots[source]?.successAt||null,sourceUpdatedAt:snapshots[source]?.sourceUpdatedAt||null,warning:snapshots[source]?.error?.match(/^(评分暂不可用|标签暂不可用)/)?snapshots[source].error:null,error:snapshots[source]?.error?.match(/^(评分暂不可用|标签暂不可用)/)?null:(snapshots[source]?.error||null)})),schedule:null}};
  liveCatalogCache={time:Date.now(),value};return value;
 }
-function catalogRoutes(items){const routes={'source-a':SOURCE_URLS.a,'source-b':SOURCE_URLS.b,'source-c':SOURCE_URLS.c};for(const r of items){routes[r.linkKey]=r.url;r.resources.forEach((link,i)=>routes[r.linkKey+'-resource-'+i]=link.url);}return routes;}
+function catalogRoutes(items){const routes={'source-a':SOURCE_URLS.a,'source-b':SOURCE_URLS.b,'source-c':SOURCE_URLS.c,'source-d':SOURCE_URLS.d};for(const r of items){routes[r.linkKey]=r.url;r.resources.forEach((link,i)=>routes[r.linkKey+'-resource-'+i]=link.url);}return routes;}
 async function fetchSource(url,asText=false,headers={}){const response=await fetch(url,{headers:{accept:asText?'text/html':'application/json',...headers},signal:AbortSignal.timeout(20000)});if(!response.ok)throw Error('来源返回 HTTP '+response.status);return asText?response.text():response.json();}
 async function fetchSourceSnapshot(source,previous=[]){const fetchedAt=new Date().toISOString();
  if(source==='a'){const [raw,reviews,tagData]=await Promise.all([fetchSource(SOURCE_URLS.a+'data.json'),fetchSource('https://api.cloudofflower.ccwu.cc/reviews').catch(()=>null),fetchSource('https://api.cloudofflower.ccwu.cc/tags').catch(()=>null)]);const ratingsReady=Array.isArray(reviews?.reviews)&&reviews.ready;return {records:await normalizeFlower(raw,reviews,fetchedAt,previous,tagData),warning:[ratingsReady?(reviews.stale?'评分暂不可用（实时同步）：当前展示原站缓存评分':null):'评分暂不可用（接口）：已使用原站目录评分或保留上次评分',Array.isArray(tagData?.tags)&&Array.isArray(tagData?.options)?null:'标签暂不可用：保留已有标签，接口恢复后自动补充'].filter(Boolean).join('；')||null,successAt:fetchedAt,sourceUpdatedAt:raw.generated};}
  if(source==='b'){const raw=await fetchSource(SOURCE_URLS.b+'api/select?table=drama_library&id=main');if(raw.error||!Array.isArray(raw.data?.data))throw Error('来源数据未准备好');return {records:normalizeSweet(raw.data.data,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:raw.data.updated_at};}
+ if(source==='d'){const raw=await fetchSource(SOURCE_URLS.d+'api/data');return {records:normalizePageVII(raw,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:null};}
  const [raw,stats]=await Promise.all([fetchSource(SOURCE_URLS.c+'api/dramas'),fetchSource(SOURCE_URLS.c+'api/stats?all=1')]);return {records:normalizeCat(raw,stats,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:null};
 }
 async function refreshStatus(env){const run=await env.DB.prepare('SELECT * FROM refresh_runs ORDER BY started_at DESC LIMIT 1').first();return {lastRun:run?{startedAt:run.started_at,finishedAt:run.finished_at,status:run.status,summary:run.summary?JSON.parse(run.summary):null}:null,nextAllowedAt:null};}
@@ -88,13 +96,13 @@ async function runCatalogRefresh(env){
  const lock=await env.DB.prepare("INSERT INTO refresh_runs (slot,started_at,status) SELECT ?,?,'running' WHERE NOT EXISTS (SELECT 1 FROM refresh_runs WHERE status='running' AND started_at>?)").bind(slot,new Date(now).toISOString(),new Date(now-300000).toISOString()).run();
  if(!lock.meta?.changes)return json({status:'already_started',message:'已有更新正在进行，请稍候再试'});
  try{
- const existing=await env.DB.prepare('SELECT source FROM source_status').all();for(const source of ['a','b','c'])if(!existing.results.some(r=>r.source===source))await storeSnapshot(env,source,SEED[source]);
+ const existing=await env.DB.prepare('SELECT source FROM source_status').all();for(const source of ['a','b','c','d'])if(!existing.results.some(r=>r.source===source))await storeSnapshot(env,source,SEED[source]||{records:[],successAt:null,sourceUpdatedAt:null});
  const previousCatalog=await getCatalog(env,true);
- const results=await Promise.allSettled(['a','b','c'].map(async source=>{
+ const results=await Promise.allSettled(['a','b','c','d'].map(async source=>{
   const snapshot=await fetchSourceSnapshot(source,previousCatalog.items.filter(r=>r.source===source));const prev=previousCatalog.meta.sources.find(s=>s.source===source);if(!snapshot.records.length||prev.count&&snapshot.records.length<prev.count*.5)throw Error('记录数异常减少，保留旧数据');
   await storeSnapshot(env,source,snapshot);return {source,count:snapshot.records.length,warning:snapshot.warning||null};
  }));
- const summary=[];for(let i=0;i<results.length;i++){const source=['a','b','c'][i],r=results[i];if(r.status==='fulfilled')summary.push({...r.value,ok:true});else{const error=String(r.reason?.message||'同步失败').slice(0,180);await env.DB.prepare('UPDATE source_status SET attempt_at=?,error=? WHERE source=?').bind(new Date().toISOString(),error,source).run();summary.push({source,ok:false,error});}}
+ const summary=[];for(let i=0;i<results.length;i++){const source=['a','b','c','d'][i],r=results[i];if(r.status==='fulfilled')summary.push({...r.value,ok:true});else{const error=String(r.reason?.message||'同步失败').slice(0,180);await env.DB.prepare('UPDATE source_status SET attempt_at=?,error=? WHERE source=?').bind(new Date().toISOString(),error,source).run();summary.push({source,ok:false,error});}}
  const status=summary.every(r=>r.ok)?'succeeded':summary.some(r=>r.ok)?'partial':'failed';await env.DB.prepare('UPDATE refresh_runs SET status=?,finished_at=?,summary=? WHERE slot=?').bind(status,new Date().toISOString(),JSON.stringify(summary),slot).run();liveCatalogCache=null;return json({status,sources:summary,meta:(await getCatalog(env,true)).meta},status==='failed'?502:200);
  }catch(error){await env.DB.prepare("UPDATE refresh_runs SET status='failed',finished_at=? WHERE slot=?").bind(new Date().toISOString(),slot).run();liveCatalogCache=null;throw error;}
 }
