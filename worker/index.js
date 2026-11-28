@@ -21,6 +21,6 @@ export default {async fetch(request,env){
   }
   return new Response(null,{status:302,headers:{location:destination,'cache-control':'no-store','referrer-policy':'no-referrer'}});
  }
- if(url.pathname==='/'||url.pathname==='/index.html')return new Response(request.method==='HEAD'?null:HTML,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-cache'}});
+ if(url.pathname==='/'||url.pathname==='/index.html')return new Response(request.method==='HEAD'?null:HTML,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store, max-age=0','pragma':'no-cache','expires':'0'}});
  return new Response('Not found',{status:404});
 },async scheduled(event,env,ctx){ctx.waitUntil(runCatalogRefresh(env));}};
