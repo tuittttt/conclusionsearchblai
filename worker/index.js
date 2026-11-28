@@ -6,6 +6,7 @@ export default {async fetch(request,env){
  if(url.pathname==='/api/catalog'){try{return json(await getCatalog(env));}catch(error){console.error('catalog read failed');return json({error:'目录暂时不可用'},503);}}
  if(url.pathname==='/api/refresh-status'){try{return json(await refreshStatus(env));}catch{return json({error:'同步状态暂不可用'},503);}}
  if(url.pathname==='/api/refresh')return refreshCatalog(request,env);
+ const account=await accountEndpoint(request,env);if(account)return account;
  const aliases=await aliasEndpoint(request,env);if(aliases)return aliases;
  if(url.pathname==='/api/counts'){
   if(request.method!=='GET')return json({error:'method_not_allowed'},405);

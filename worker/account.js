@@ -1,0 +1,41 @@
+const ACCOUNT_COOKIE='__Host-drama_session',ACCOUNT_SESSION_MS=30*86400000;
+const randomAccountToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
+const equalAccountHash=(a,b)=>{if(typeof a!=='string'||typeof b!=='string'||a.length!==b.length)return false;let n=0;for(let i=0;i<a.length;i++)n|=a.charCodeAt(i)^b.charCodeAt(i);return n===0;};
+async function accountPasswordHash(password,salt){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);const result=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:new TextEncoder().encode(salt),iterations:100000},key,256);return Array.from(new Uint8Array(result),b=>b.toString(16).padStart(2,'0')).join('');}
+async function accountEndpoint(request,env){
+ const path=new URL(request.url).pathname;if(!['/api/account','/api/account/register','/api/account/login','/api/account/logout','/api/account/recover','/api/account/favorites'].includes(path))return null;
+ const reply=(body,status=200,cookie)=>{const r=json(body,status);if(cookie!==undefined)r.headers.set('set-cookie',`${ACCOUNT_COOKIE}=${cookie}; Path=/; Max-Age=${cookie?2592000:0}; HttpOnly; Secure; SameSite=Lax`);return r;};
+ const now=Date.now(),token=(request.headers.get('cookie')||'').match(/(?:^|;\s*)__Host-drama_session=([a-f0-9]{64})(?:;|$)/)?.[1];
+ const session=async()=>token?env.DB.prepare('SELECT a.id,a.username FROM account_sessions s JOIN accounts a ON a.id=s.account_id WHERE s.token_hash=? AND s.expires_at>?').bind(await digest(token),now).first():null;
+ const favorites=async id=>(await env.DB.prepare('SELECT drama_id FROM account_favorites WHERE account_id=? ORDER BY created_at,drama_id').bind(id).all()).results.map(r=>r.drama_id);
+ const signedIn=async(user,recoveryCode)=>{const next=randomAccountToken();await env.DB.batch([env.DB.prepare('DELETE FROM account_sessions WHERE expires_at<=?').bind(now),env.DB.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(await digest(next),user.id,now+ACCOUNT_SESSION_MS)]);return reply({user:{id:user.id,username:user.username},favorites:await favorites(user.id),...(recoveryCode?{recoveryCode}:{})},200,next);};
+ try{
+  if(request.method==='GET'&&path==='/api/account'){const user=await session();return reply({user:user||null,favorites:user?await favorites(user.id):[]});}
+  if(request.method!=='POST')return reply({error:'不支持的请求方式'},405);
+  if(request.headers.get('origin')!==new URL(request.url).origin)return reply({error:'请从本站操作'},403);
+  if(!(request.headers.get('content-type')||'').startsWith('application/json'))return reply({error:'需要 JSON 请求'},415);
+  if(Number(request.headers.get('content-length')||0)>32768)return reply({error:'请求内容过长'},413);const text=await request.text();if(text.length>32768)return reply({error:'请求内容过长'},413);let body;try{body=JSON.parse(text);}catch{return reply({error:'请求格式不正确'},400);}if(!body||typeof body!=='object'||Array.isArray(body))return reply({error:'请求格式不正确'},400);
+  if(path==='/api/account/logout'){if(token)await env.DB.prepare('DELETE FROM account_sessions WHERE token_hash=?').bind(await digest(token)).run();return reply({user:null,favorites:[]},200,'');}
+  if(path==='/api/account/favorites'){
+   const user=await session();if(!user)return reply({error:'登录已过期，请重新登录',code:'login_required'},401);
+   const add=body.add??[],remove=body.remove??[];if(!Array.isArray(add)||!Array.isArray(remove)||add.length+remove.length>200||[...add,...remove].some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(id)))return reply({error:'收藏数据格式不正确'},400);
+   const count=await env.DB.prepare('SELECT COUNT(*) AS n FROM account_favorites WHERE account_id=?').bind(user.id).first();if(count.n+new Set(add).size>5000)return reply({error:'最多保存 5000 条收藏'},400);
+   const statements=[...new Set(remove)].map(id=>env.DB.prepare('DELETE FROM account_favorites WHERE account_id=? AND drama_id=?').bind(user.id,id));for(const id of new Set(add))statements.push(env.DB.prepare('INSERT OR IGNORE INTO account_favorites(account_id,drama_id,created_at) VALUES (?,?,?)').bind(user.id,id,now));if(statements.length)await env.DB.batch(statements);return reply({user,favorites:await favorites(user.id)});
+  }
+  const scope=path.split('/').at(-1),ip=await digest(request.headers.get('cf-connecting-ip')||'unknown'),rateKey=`${scope}:${ip}:${Math.floor(now/900000)}`;
+  await env.DB.batch([env.DB.prepare('DELETE FROM account_rate_limits WHERE expires_at<?').bind(now-86400000),env.DB.prepare('INSERT INTO account_rate_limits(key,attempts,expires_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1').bind(rateKey,now+900000)]);const rate=await env.DB.prepare('SELECT attempts FROM account_rate_limits WHERE key=?').bind(rateKey).first();if(rate.attempts>(scope==='register'?5:15))return reply({error:'尝试次数较多，请 15 分钟后再试'},429);
+  const username=typeof body.username==='string'?body.username.normalize('NFKC').trim():'',usernameKey=username.toLowerCase(),password=body.password;
+  if(!/^[\p{L}\p{N}_-]{3,30}$/u.test(username)||typeof password!=='string'||password.length<8||password.length>128)return reply({error:'用户名需 3～30 个字母、汉字、数字或下划线；密码需 8～128 个字符'},400);
+  const existing=await env.DB.prepare('SELECT * FROM accounts WHERE username_key=?').bind(usernameKey).first();
+  if(scope==='register'){
+   if(existing)return reply({error:'这个用户名已被使用'},409);
+   const id=crypto.randomUUID(),salt=randomAccountToken(),recoveryCode=randomAccountToken(),hash=await accountPasswordHash(password,salt);
+   await env.DB.prepare('INSERT INTO accounts(id,username,username_key,password_salt,password_hash,recovery_hash,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(username_key) DO NOTHING').bind(id,username,usernameKey,salt,hash,await digest(recoveryCode),now).run();const created=await env.DB.prepare('SELECT id,username FROM accounts WHERE username_key=?').bind(usernameKey).first();if(created?.id!==id)return reply({error:'这个用户名已被使用'},409);return signedIn(created,recoveryCode);
+  }
+  if(scope==='recover'){
+   const recovery=typeof body.recoveryCode==='string'?body.recoveryCode.trim():'';if(!existing||!equalAccountHash(await digest(recovery),existing.recovery_hash))return reply({error:'用户名或恢复码不正确'},401);
+   const salt=randomAccountToken(),nextRecovery=randomAccountToken();const changed=await env.DB.prepare('UPDATE accounts SET password_salt=?,password_hash=?,recovery_hash=? WHERE id=? AND recovery_hash=? RETURNING id').bind(salt,await accountPasswordHash(password,salt),await digest(nextRecovery),existing.id,existing.recovery_hash).first();if(!changed)return reply({error:'恢复码已失效，请使用最新恢复码'},401);await env.DB.prepare('DELETE FROM account_sessions WHERE account_id=?').bind(existing.id).run();return signedIn(existing,nextRecovery);
+  }
+  const candidate=await accountPasswordHash(password,existing?.password_salt||'0000000000000000000000000000000000000000000000000000000000000000');if(!existing||!equalAccountHash(candidate,existing.password_hash))return reply({error:'用户名或密码不正确'},401);return signedIn(existing);
+ }catch(error){console.error('Account service failure',String(error?.message||'').slice(0,100));return reply({error:'账户服务暂时不可用，请稍后重试'},503);}
+}

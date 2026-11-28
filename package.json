@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "deploy": "node scripts/deploy-cloudflare.mjs",
-    "test": "node tests/catalog-workflow.mjs && node tests/alias-workflow.mjs && node tests/refresh-workflow.mjs && node tests/flower-ratings.mjs && node tests/rating-tags.mjs && node tests/proposal-loading.mjs && node tests/source-rating-sync.mjs",
+    "test": "node tests/catalog-workflow.mjs && node tests/alias-workflow.mjs && node tests/refresh-workflow.mjs && node tests/flower-ratings.mjs && node tests/rating-tags.mjs && node tests/proposal-loading.mjs && node tests/source-rating-sync.mjs && node tests/account-workflow.mjs",
     "dev": "wrangler dev"
   },
   "devDependencies": {
