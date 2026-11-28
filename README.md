@@ -102,3 +102,7 @@ node tests/alias-workflow.mjs
 ## 可选邮箱
 
 支持可选验证邮箱注册、已有账号绑定邮箱、邮箱加密码登录和邮件验证码重设密码。配置前仍可使用用户名注册，无邮箱注册会提示并要求确认丢失密码与恢复码后的风险。实际发信需要配置 `RESEND_API_KEY` 和 `EMAIL_FROM`，完整步骤见 [EMAIL_SETUP.md](EMAIL_SETUP.md)。验证码只保存哈希，10 分钟有效，最多验证 5 次；密码重设后旧会话失效，收藏保留。
+
+## Firebase 托管邮箱（当前方式）
+
+当前使用项目 `my-aisearch` 的 Firebase Authentication 发送验证、找回密码链接，不依赖 Resend 或自购发信域名；仍保留无邮箱注册和本地账号。邮件是链接验证而非数字验证码。完整配置和旧账号绑定步骤见 [FIREBASE_SETUP.md](FIREBASE_SETUP.md)。收藏仍存于 Cloudflare D1，不启用 Google Analytics。

@@ -14,5 +14,9 @@
       "0 4,10,16,22 * * *"
     ]
   },
-  "keep_vars": true
+  "keep_vars": true,
+  "vars": {
+    "FIREBASE_API_KEY": "AIzaSyAx7Q9xDTNW0juqVtKD4TOE3HI_y2tvXag",
+    "FIREBASE_PROJECT_ID": "my-aisearch"
+  }
 }

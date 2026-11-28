@@ -1,10 +1,10 @@
-const accountEmailConfigured=env=>!!(env.RESEND_API_KEY&&env.EMAIL_FROM);
+const accountEmailConfigured=env=>!!(env.RESEND_API_KEY&&env.EMAIL_FROM)||accountFirebaseConfigured(env);
 const normalizeAccountEmail=value=>typeof value==='string'?value.trim().toLowerCase():'';
 const validAccountEmail=email=>email.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email);
 function accountEmailError(message,status=400){throw Object.assign(Error(message),{publicStatus:status});}
 async function accountEmailLimit(env,key,max,now,window=900000){const bucket=key+':'+Math.floor(now/window);await env.DB.prepare('INSERT INTO account_rate_limits(key,attempts,expires_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1').bind(bucket,now+window).run();const row=await env.DB.prepare('SELECT attempts FROM account_rate_limits WHERE key=?').bind(bucket).first();if(row.attempts>max)accountEmailError('发送次数较多，请稍后再试',429);}
 async function requestAccountEmail(request,env,body,user){
- if(!accountEmailConfigured(env))accountEmailError('邮箱验证暂未开放，请先使用用户名和密码',503);
+ if(!(env.RESEND_API_KEY&&env.EMAIL_FROM))accountEmailError(accountFirebaseConfigured(env)?'请使用邮件链接完成邮箱验证':'邮箱验证暂未开放，请先使用用户名和密码',503);
  const email=normalizeAccountEmail(body.email),purpose=body.purpose;if(!validAccountEmail(email)||!['register','bind','reset'].includes(purpose))accountEmailError('请填写有效邮箱并选择操作');const now=Date.now();
  await accountEmailLimit(env,'mail-ip:'+await digest(request.headers.get('cf-connecting-ip')||'unknown'),5,now);await accountEmailLimit(env,'mail-address:'+await digest(email),5,now);await accountEmailLimit(env,'mail-total',Number(env.EMAIL_DAILY_LIMIT)||90,now,86400000);
  const recent=await env.DB.prepare('SELECT created_at FROM account_email_codes WHERE email=? AND purpose=? ORDER BY created_at DESC LIMIT 1').bind(email,purpose).first();if(recent&&now-recent.created_at<60000)accountEmailError('请等待 60 秒再发送',429);
