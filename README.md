@@ -106,3 +106,7 @@ node tests/alias-workflow.mjs
 ## Firebase 托管邮箱（当前方式）
 
 当前使用项目 `my-aisearch` 的 Firebase Authentication 发送验证、找回密码链接，不依赖 Resend 或自购发信域名；仍保留无邮箱注册和本地账号。邮件是链接验证而非数字验证码。完整配置和旧账号绑定步骤见 [FIREBASE_SETUP.md](FIREBASE_SETUP.md)。收藏仍存于 Cloudflare D1，不启用 Google Analytics。
+
+## 已看与想看
+
+剧集卡片提供「已看」「想看」按钮，收起模式也可操作；再次点击已选标记可取消。两种观看状态互斥，收藏独立保留。顶部可分别查看全部、收藏、已看、想看。未登录数据保存于当前浏览器，登录后自动合并到账号并跨浏览器同步；合并时云端已有状态优先，退出登录不会把账号状态留给匿名访客。合并剧集按各来源记录保留状态，拆分后原有记录的标记仍在。部署自动应用 `0007_watchlist.sql`。
