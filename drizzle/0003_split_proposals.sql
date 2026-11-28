@@ -1,0 +1,1 @@
+ALTER TABLE alias_proposals ADD COLUMN separate INTEGER NOT NULL DEFAULT 0;
