@@ -1,0 +1,22 @@
+const accountEmailConfigured=env=>!!(env.RESEND_API_KEY&&env.EMAIL_FROM);
+const normalizeAccountEmail=value=>typeof value==='string'?value.trim().toLowerCase():'';
+const validAccountEmail=email=>email.length<=254&&/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email);
+function accountEmailError(message,status=400){throw Object.assign(Error(message),{publicStatus:status});}
+async function accountEmailLimit(env,key,max,now,window=900000){const bucket=key+':'+Math.floor(now/window);await env.DB.prepare('INSERT INTO account_rate_limits(key,attempts,expires_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1').bind(bucket,now+window).run();const row=await env.DB.prepare('SELECT attempts FROM account_rate_limits WHERE key=?').bind(bucket).first();if(row.attempts>max)accountEmailError('发送次数较多，请稍后再试',429);}
+async function requestAccountEmail(request,env,body,user){
+ if(!accountEmailConfigured(env))accountEmailError('邮箱验证暂未开放，请先使用用户名和密码',503);
+ const email=normalizeAccountEmail(body.email),purpose=body.purpose;if(!validAccountEmail(email)||!['register','bind','reset'].includes(purpose))accountEmailError('请填写有效邮箱并选择操作');const now=Date.now();
+ await accountEmailLimit(env,'mail-ip:'+await digest(request.headers.get('cf-connecting-ip')||'unknown'),5,now);await accountEmailLimit(env,'mail-address:'+await digest(email),5,now);await accountEmailLimit(env,'mail-total',Number(env.EMAIL_DAILY_LIMIT)||90,now,86400000);
+ const recent=await env.DB.prepare('SELECT created_at FROM account_email_codes WHERE email=? AND purpose=? ORDER BY created_at DESC LIMIT 1').bind(email,purpose).first();if(recent&&now-recent.created_at<60000)accountEmailError('请等待 60 秒再发送',429);
+ let accountId=null;const owner=await env.DB.prepare('SELECT id FROM accounts WHERE email=?').bind(email).first();
+ if(purpose==='bind'){if(!user)accountEmailError('请先登录',401);const current=await env.DB.prepare('SELECT password_salt,password_hash FROM accounts WHERE id=?').bind(user.id).first();if(typeof body.password!=='string'||!current||!equalAccountHash(await accountPasswordHash(body.password,current.password_salt),current.password_hash))accountEmailError('当前密码不正确',401);if(owner&&owner.id!==user.id)accountEmailError('该邮箱已绑定其他账号',409);accountId=user.id;}
+ if(purpose==='register'&&owner)accountEmailError('该邮箱已注册，请使用邮箱登录',409);if(purpose==='reset')accountId=owner?.id||null;
+ const id=randomAccountToken(),code=String(crypto.getRandomValues(new Uint32Array(1))[0]%1000000).padStart(6,'0');await env.DB.batch([env.DB.prepare('DELETE FROM account_email_codes WHERE expires_at<?').bind(now-86400000),env.DB.prepare('INSERT INTO account_email_codes(id,email,purpose,account_id,code_hash,created_at,expires_at) VALUES (?,?,?,?,?,?,?)').bind(id,email,purpose,accountId,await digest(id+':'+code),now,now+600000)]);
+ if(purpose!=='reset'||accountId){try{const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:'Bearer '+env.RESEND_API_KEY,'content-type':'application/json'},body:JSON.stringify({from:env.EMAIL_FROM,to:[email],subject:'剧集汇 · 邮箱验证码',text:`你的剧集汇验证码是：${code}\n\n用途：${{register:'注册账号',bind:'绑定邮箱',reset:'重设密码'}[purpose]}。验证码 10 分钟内有效。若不是你本人操作，请忽略。`}),signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error('send failed');}catch{await env.DB.prepare('DELETE FROM account_email_codes WHERE id=?').bind(id).run();accountEmailError('邮件暂未发送成功，请稍后重试',503);}}
+ return {challengeId:id,message:purpose==='reset'?'如果该邮箱已绑定账号，验证码将发送到该邮箱':'验证码已发送，请检查收件箱和垃圾邮件'};
+}
+async function consumeAccountEmail(env,{email,purpose,challengeId,code,accountId}){
+ email=normalizeAccountEmail(email);if(!validAccountEmail(email)||typeof challengeId!=='string'||!/^[a-f0-9]{64}$/.test(challengeId)||typeof code!=='string'||!/^\d{6}$/.test(code))accountEmailError('邮箱或验证码不正确');const now=Date.now();
+ const row=await env.DB.prepare('UPDATE account_email_codes SET attempts=attempts+1 WHERE id=? AND email=? AND purpose=? AND consumed_at IS NULL AND expires_at>? AND attempts<5 RETURNING *').bind(challengeId,email,purpose,now).first();if(!row||!equalAccountHash(await digest(challengeId+':'+code),row.code_hash)||(accountId!==undefined&&row.account_id!==accountId))accountEmailError('验证码不正确、已过期或已使用');
+ const consumed=await env.DB.prepare('UPDATE account_email_codes SET consumed_at=? WHERE id=? AND consumed_at IS NULL RETURNING id').bind(now,challengeId).first();if(!consumed)accountEmailError('验证码已使用');return row;
+}
