@@ -1,0 +1,4 @@
+Stamp lettering rendered from Alimama DaoLiTi (阿里妈妈刀隶体).
+Copyright (c) 2023 Alibaba (China) Co., Ltd. All rights reserved.
+Official font information: https://www.iconfont.cn/fonts
+Only rendered glyph outlines are included; the font file is not distributed.
