@@ -27,9 +27,10 @@ async function normalizeFlower(raw,reviews,fetchedAt,previous=[],tagData=null){
   return {id,...names,source:'a',sourceId:String(x.title),sourceTitle:x.title,date:x.date||null,sortAt:preciseTime(x.updated_at)||preciseTime(x.added_at),sourceOrder,type:'AI剧',tags:cleanTags(tagsReady?(tagMap.get(keyName(x.title))||[]):(previousTags.get(keyName(x.title))||[])),cover:safeURL(x.thumbnail||x.image,SOURCE_URLS.a),score:(s?scoreValue(s[0]/s[1],s[1]):null)||flowerSummaryScore(x.rating)||((!ratingsReady||reviews.stale)?previousScores.get(keyName(x.title)):null)||null,url:SOURCE_URLS.a+'drama.html?title='+encodeURIComponent(x.title)+'&drama='+encodeURIComponent(x.title),linkKey:(legacy||id)+'-a',resources:Object.entries(x.links||{}).map(([label,url])=>({label,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
  }));
 }
+function isSweetLGBT(record){const labels=cleanTags(record.tags).map(t=>t.normalize('NFKC').toUpperCase().replace(/\s/g,''));return !labels.some(t=>['BG','OBG'].includes(t))&&labels.some(t=>['OBL','OGL','BL','GL','LGBT','LGBT+','LGBTQ','LGBTQ+','LGBTQIA+'].includes(t));}
 function normalizeSweet(raw,fetchedAt){
  if(!Array.isArray(raw))throw Error('目录格式不正确');
- return raw.filter(x=>!x._deleted&&x.id&&x.title).map((x,sourceOrder)=>{
+ return raw.filter(x=>!x._deleted&&x.id&&x.title&&isSweetLGBT(x)).map((x,sourceOrder)=>{
   const names=displayNames(x.title,x.enTitle),id='b-'+x.id;
   return {id,...names,source:'b',sourceId:String(x.id),sourceTitle:String(x.title),date:x.addedAt||null,sortAt:preciseTime(x.updatedAt)||preciseTime(x.createdAt)||preciseTime(x.addedAt),sourceOrder,type:'',tags:cleanTags([...cleanTags(x.tags),...cleanTags(x.styles),...cleanTags(x.country)]),cover:SOURCE_URLS.b.split('?')[0]+'posters/'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp',score:scoreValue(x.rating,x.votes),url:SOURCE_URLS.b,linkKey:id+'-b',resources:(x.links||[]).map(l=>({label:l.platform||'资源',url:safeURL(l.url)})).filter(r=>r.url),fetchedAt};
  });
@@ -67,6 +68,8 @@ async function getCatalog(env,force=false){
  if(!force&&liveCatalogCache&&Date.now()-liveCatalogCache.time<60000)return liveCatalogCache.value;
  const snapshots=structuredClone(SEED);snapshots.d||={records:[],successAt:null};const statuses=await env.DB.prepare('SELECT * FROM source_status').all();
  for(const status of statuses.results){const chunks=await env.DB.prepare('SELECT payload FROM source_snapshots WHERE source=? AND revision=? ORDER BY chunk_index').bind(status.source,status.active_revision).all();snapshots[status.source]={records:chunks.results.length?chunks.results.flatMap(c=>JSON.parse(c.payload)):(snapshots[status.source]?.records||[]),successAt:status.success_at,sourceUpdatedAt:status.source_updated_at,error:status.error,attemptAt:status.attempt_at};}
+ // Apply the category policy to existing snapshots as well as new imports.
+ snapshots.b.records=snapshots.b.records.filter(isSweetLGBT);
  // Stored snapshots may still contain the retired WorkBuddy address.
  for(const r of snapshots.b?.records||[]){r.url=SOURCE_URLS.b;r.cover=SOURCE_URLS.b+'posters/'+String(r.sourceId).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp';}
  const items=matchCatalog(snapshots),groups=new Set(items.map(r=>r.autoGroup));

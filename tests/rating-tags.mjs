@@ -15,3 +15,6 @@ assert.deepEqual((await normalizeFlower(raw,null,'now',previous,{options:[],tags
 assert.deepEqual(normalizeSweet([{id:'x',title:'x',tags:['BL'],styles:['甜宠']}],'now')[0].tags,['BL','甜宠']);
 assert.deepEqual(normalizeCat({ok:true,items:[{id:1,name:'x',genre:'bl',tags:['校园'],hiddenTags:['隐藏']} ]},{ok:true,stats:{}},'now')[0].tags,['bl','校园']);
 console.log('PASS: inclusive score filter, unrated exclusion, same-record tag/source matching, clear filters, source tags, tag outage preservation and recovery');
+
+const categories=[['OBL'],['OBG'],['BG'],['GL'],[],['OBL','OBG'],['LGBT+']];const filtered=normalizeSweet(categories.map((tags,i)=>({id:String(i),title:'分类测试'+i,tags})),'now');assert.deepEqual(filtered.map(r=>r.sourceId),['0','3','6']);
+console.log('PASS: second source allows explicit LGBT categories, excludes BG, mixed BG and unclassified records');

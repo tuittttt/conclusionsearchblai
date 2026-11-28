@@ -23,7 +23,7 @@ assert.equal((await call('/api/refresh',{method:'POST',headers:{origin:base}})).
 assert.equal((await call('/api/refresh',{method:'POST',headers:{origin:'https://other.test'}})).status,403);
 const options={method:'POST',headers:{origin:base,cookie:'drama_visitor=11111111-1111-4111-8111-111111111111'}};
 let r=await call('/api/refresh',options);assert.equal(r.status,200);const result=await r.json();assert.equal(result.status,'partial');assert.equal(result.sources.find(r=>r.source==='b').ok,false);
-const catalog=await (await call('/api/catalog')).json();assert.equal(catalog.items.filter(r=>r.source==='b').length,830);assert.ok(catalog.meta.sources.find(s=>s.source==='b').error);assert.equal(catalog.meta.sourceRecordCount,3716);
+const catalog=await (await call('/api/catalog')).json();assert.equal(catalog.items.filter(r=>r.source==='b').length,587);assert.ok(catalog.meta.sources.find(s=>s.source==='b').error);assert.equal(catalog.meta.sourceRecordCount,3473);
 let calls=fetchCount;r=await call('/api/refresh',options);assert.equal((await r.json()).status,'partial');assert.ok(fetchCount>calls);
 // A claim from another Worker blocks overlap, but abandoned claims expire.
 sql({statements:[{sql:"INSERT INTO refresh_runs(slot,started_at,status) VALUES ('other',?,'running')",args:[new Date().toISOString()]}]});
@@ -34,7 +34,7 @@ assert.equal((await (await call('/api/refresh-status')).json()).nextAllowedAt,nu
 // New Sweet origin uses the site's public SQLite API and keeps stable click keys.
 const failingSweet=globalThis.fetch;
 sql({statements:[{sql:'DELETE FROM refresh_runs'}]});
-globalThis.fetch=async url=>String(url)==='https://www.tdmf.top/api/select?table=drama_library&id=main'?Response.json({data:{data:seed.b.records.map(r=>({id:r.sourceId,title:r.sourceTitle,enTitle:r.en,addedAt:r.date,rating:r.score?.[0],votes:r.score?.[1],links:r.resources.map(l=>({platform:l.label,url:l.url}))})),updated_at:'2026-11-25T12:00:00Z'},error:null}):failingSweet(url);
+globalThis.fetch=async url=>String(url)==='https://www.tdmf.top/api/select?table=drama_library&id=main'?Response.json({data:{data:seed.b.records.map(r=>({id:r.sourceId,title:r.sourceTitle,enTitle:r.en,addedAt:r.date,tags:r.tags,rating:r.score?.[0],votes:r.score?.[1],links:r.resources.map(l=>({platform:l.label,url:l.url}))})),updated_at:'2026-11-25T12:00:00Z'},error:null}):failingSweet(url);
 const sweetResult=await (await call('/api/refresh',options)).json();assert.equal(sweetResult.sources.find(s=>s.source==='b').ok,true);assert.equal((await call('/go/'+seed.b.records[0].linkKey)).headers.get('location'),'https://www.tdmf.top/');
 const sweetCatalog=await (await call('/api/catalog')).json();assert.ok(sweetCatalog.items.filter(r=>r.source==='b').every(r=>r.cover.startsWith('https://www.tdmf.top/posters/')));
 console.log('PASS: migrated Sweet public API, stable redirect keys, new cover origin');
@@ -61,5 +61,5 @@ const pageCatalog=await (await call('/api/catalog')).json();const pageRecord=pag
 globalThis.fetch=async url=>String(url)==='https://www.pagevii.com/api/data'?Response.json({dramas:[]}):priorFetch(url);
 assert.equal((await (await call('/api/refresh',options)).json()).sources.find(s=>s.source==='d').ok,false);assert.equal((await (await call('/api/catalog')).json()).items.filter(r=>r.source==='d').length,1);
 console.log('PASS: fourth source without seed, public catalog/ratings/tags/media/resources, draft and invalid link exclusion, stable redirects, failed update preservation');
-console.log('PASS: authorized same-site refresh, atomic snapshots, failed-source preservation, 3716 records retained, immediate repeat refresh, overlap lock and stale-lock recovery, legacy redirect/count, open-source download');
+console.log('PASS: authorized same-site refresh, atomic snapshots, failed-source preservation, BG excluded from saved snapshots, immediate repeat refresh, overlap lock and stale-lock recovery, legacy redirect/count, open-source download');
 }finally{globalThis.fetch=originalFetch;fs.rmSync(tmp,{recursive:true,force:true});}
