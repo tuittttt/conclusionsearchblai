@@ -9,26 +9,29 @@ function displayNames(title,en=''){
  zh=zh||title;const aliases=zh.split(/\s*[/／|｜]\s*/).map(s=>s.trim()).filter(s=>s.length>=3);
  return {title:zh,en,aliases:aliases.length>1?aliases:[]};
 }
+const cleanTags=value=>[...new Set((Array.isArray(value)?value:typeof value==='string'?[value]:[]).filter(t=>typeof t==='string'||typeof t==='number').map(t=>String(t).trim()).filter(Boolean))];
 const scoreValue=(score,count)=>Number(count)>0&&Number(score)>=.5&&Number(score)<=5?[Math.round(Number(score)*10)/10,Number(count)]:null;
 function preciseTime(value){if(typeof value==='number')return Number.isFinite(value)&&value>0?value:null;if(typeof value==='string'&&value.includes('T')){const n=Date.parse(value);return Number.isFinite(n)?n:null;}return null;}
 function flowerSummaryScore(value){const m=String(value||'').match(/评分[：:]\s*(\d+(?:\.\d+)?)\s*\/\s*5\s*[（(]\s*(\d+)\s*条评分/);return m?scoreValue(m[1],m[2]):null;}
-async function normalizeFlower(raw,reviews,fetchedAt,previous=[]){
+async function normalizeFlower(raw,reviews,fetchedAt,previous=[],tagData=null){
  if(!Array.isArray(raw.items))throw Error('目录格式不正确');
  const ratingsReady=Array.isArray(reviews?.reviews)&&reviews.ready;
+ const tagsReady=Array.isArray(tagData?.tags)&&Array.isArray(tagData?.options),tagMap=new Map();if(tagsReady)for(const t of tagData.tags){if(typeof t.drama!=='string'||typeof t.tag!=='string'||!(Number(t.count)>0))continue;const key=keyName(t.drama);tagMap.set(key,[...(tagMap.get(key)||[]),t.tag]);}
+ const previousTags=new Map(previous.map(r=>[keyName(r.sourceTitle),r.tags||[]]));
  const previousScores=new Map(previous.map(r=>[keyName(r.sourceTitle),r.score]));
  const scores=new Map();for(const r of ratingsReady?reviews.reviews:[]){if(Number(r.rating)<.5||Number(r.rating)>5)continue;const k=keyName(r.drama),s=scores.get(k)||[0,0];s[0]+=Number(r.rating);s[1]++;scores.set(k,s);}
  return Promise.all(raw.items.filter(x=>x.title).map(async (x,sourceOrder)=>{
   const names=displayNames(x.title),legacy=keyName(names.en)===keyName("The CEO's Manservant")?'ceo':keyName(names.en)===keyName('Signed By My Dangerous Agent')?'agent':null;
   const stable=String(x.image||'').match(/[a-f0-9]{8}-[a-f0-9-]{27,}/i)?.[0]||(await digest(x.title)).slice(0,24);
   const id=legacy||'a-'+stable,s=scores.get(keyName(x.title));
-  return {id,...names,source:'a',sourceId:String(x.title),sourceTitle:x.title,date:x.date||null,sortAt:preciseTime(x.updated_at)||preciseTime(x.added_at),sourceOrder,type:'AI剧',tags:[],cover:safeURL(x.thumbnail||x.image,SOURCE_URLS.a),score:(s?scoreValue(s[0]/s[1],s[1]):null)||flowerSummaryScore(x.rating)||((!ratingsReady||reviews.stale)?previousScores.get(keyName(x.title)):null)||null,url:SOURCE_URLS.a+'drama.html?title='+encodeURIComponent(x.title)+'&drama='+encodeURIComponent(x.title),linkKey:(legacy||id)+'-a',resources:Object.entries(x.links||{}).map(([label,url])=>({label,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'a',sourceId:String(x.title),sourceTitle:x.title,date:x.date||null,sortAt:preciseTime(x.updated_at)||preciseTime(x.added_at),sourceOrder,type:'AI剧',tags:cleanTags(tagsReady?(tagMap.get(keyName(x.title))||[]):(previousTags.get(keyName(x.title))||[])),cover:safeURL(x.thumbnail||x.image,SOURCE_URLS.a),score:(s?scoreValue(s[0]/s[1],s[1]):null)||flowerSummaryScore(x.rating)||((!ratingsReady||reviews.stale)?previousScores.get(keyName(x.title)):null)||null,url:SOURCE_URLS.a+'drama.html?title='+encodeURIComponent(x.title)+'&drama='+encodeURIComponent(x.title),linkKey:(legacy||id)+'-a',resources:Object.entries(x.links||{}).map(([label,url])=>({label,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
  }));
 }
 function normalizeSweet(raw,fetchedAt){
  if(!Array.isArray(raw))throw Error('目录格式不正确');
  return raw.filter(x=>!x._deleted&&x.id&&x.title).map((x,sourceOrder)=>{
   const names=displayNames(x.title,x.enTitle),id='b-'+x.id;
-  return {id,...names,source:'b',sourceId:String(x.id),sourceTitle:String(x.title),date:x.addedAt||null,sortAt:preciseTime(x.updatedAt)||preciseTime(x.createdAt)||preciseTime(x.addedAt),sourceOrder,type:'',tags:[...(x.tags||[]),...(x.styles||[])],cover:SOURCE_URLS.b.split('?')[0]+'posters/'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp',score:scoreValue(x.rating,x.votes),url:SOURCE_URLS.b,linkKey:id+'-b',resources:(x.links||[]).map(l=>({label:l.platform||'资源',url:safeURL(l.url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'b',sourceId:String(x.id),sourceTitle:String(x.title),date:x.addedAt||null,sortAt:preciseTime(x.updatedAt)||preciseTime(x.createdAt)||preciseTime(x.addedAt),sourceOrder,type:'',tags:cleanTags([...cleanTags(x.tags),...cleanTags(x.styles),...cleanTags(x.country)]),cover:SOURCE_URLS.b.split('?')[0]+'posters/'+String(x.id).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp',score:scoreValue(x.rating,x.votes),url:SOURCE_URLS.b,linkKey:id+'-b',resources:(x.links||[]).map(l=>({label:l.platform||'资源',url:safeURL(l.url)})).filter(r=>r.url),fetchedAt};
  });
 }
 function normalizeCat(raw,stats,fetchedAt){
@@ -36,7 +39,7 @@ function normalizeCat(raw,stats,fetchedAt){
  return raw.items.filter(x=>x.id&&x.name).map((x,sourceOrder)=>{
   const names=displayNames(x.name,x.sub),id='c-'+x.id,legacy=Number(x.id)===2400?'ceo':Number(x.id)===2382?'agent':null,s=stats.stats[String(x.id)];
   const cover=x.posterBlob?SOURCE_URLS.c+'api/poster/'+x.id+'?v='+encodeURIComponent(x.posterVer||'20261119a'):x.posterFile?SOURCE_URLS.c+'posters_tn/'+encodeURIComponent(x.posterFile)+'?v=20261119a':null;
-  return {id,...names,source:'c',sourceId:String(x.id),sourceTitle:x.name,date:x.created_at?new Date(x.created_at).toISOString().slice(0,10):null,sortAt:preciseTime(x.updated_at)||preciseTime(x.created_at),sourceOrder,type:{ai:'AI剧',short:'真人短剧',long:'长剧'}[x.type]||x.type||'',tags:[x.genre,x.country,x.year].filter(Boolean),cover,score:s?scoreValue(s.avg,s.count):null,url:SOURCE_URLS.c+'?drama='+x.id,linkKey:(legacy||id)+'-c',resources:Object.entries(x.links||{}).filter(([k])=>k!=='pwd').map(([key,url])=>({label:({baidu:'百度网盘',uc:'UC网盘',quark:'夸克网盘',xunlei:'迅雷网盘'})[key]||key,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
+  return {id,...names,source:'c',sourceId:String(x.id),sourceTitle:x.name,date:x.created_at?new Date(x.created_at).toISOString().slice(0,10):null,sortAt:preciseTime(x.updated_at)||preciseTime(x.created_at),sourceOrder,type:{ai:'AI剧',short:'真人短剧',long:'长剧'}[x.type]||x.type||'',tags:cleanTags([x.genre,x.country,x.year,...cleanTags(x.tags)]),cover,score:s?scoreValue(s.avg,s.count):null,url:SOURCE_URLS.c+'?drama='+x.id,linkKey:(legacy||id)+'-c',resources:Object.entries(x.links||{}).filter(([k])=>k!=='pwd').map(([key,url])=>({label:({baidu:'百度网盘',uc:'UC网盘',quark:'夸克网盘',xunlei:'迅雷网盘'})[key]||key,url:safeURL(url)})).filter(r=>r.url),fetchedAt};
  });
 }
 function matchCatalog(snapshots){
@@ -60,13 +63,13 @@ async function getCatalog(env,force=false){
  // Stored snapshots may still contain the retired WorkBuddy address.
  for(const r of snapshots.b?.records||[]){r.url=SOURCE_URLS.b;r.cover=SOURCE_URLS.b+'posters/'+String(r.sourceId).replace(/[^A-Za-z0-9_-]/g,'_')+'.webp';}
  const items=matchCatalog(snapshots),groups=new Set(items.map(r=>r.autoGroup));
- const value={items,meta:{sourceRecordCount:items.length,dramaCount:groups.size,sources:['a','b','c'].map(source=>({source,name:SOURCE_NAMES[source],count:snapshots[source]?.records.length||0,successAt:snapshots[source]?.successAt||null,sourceUpdatedAt:snapshots[source]?.sourceUpdatedAt||null,warning:snapshots[source]?.error?.startsWith('评分暂不可用')?snapshots[source].error:null,error:snapshots[source]?.error?.startsWith('评分暂不可用')?null:(snapshots[source]?.error||null)})),schedule:null}};
+ const value={items,meta:{sourceRecordCount:items.length,dramaCount:groups.size,sources:['a','b','c'].map(source=>({source,name:SOURCE_NAMES[source],count:snapshots[source]?.records.length||0,successAt:snapshots[source]?.successAt||null,sourceUpdatedAt:snapshots[source]?.sourceUpdatedAt||null,warning:snapshots[source]?.error?.match(/^(评分暂不可用|标签暂不可用)/)?snapshots[source].error:null,error:snapshots[source]?.error?.match(/^(评分暂不可用|标签暂不可用)/)?null:(snapshots[source]?.error||null)})),schedule:null}};
  liveCatalogCache={time:Date.now(),value};return value;
 }
 function catalogRoutes(items){const routes={'source-a':SOURCE_URLS.a,'source-b':SOURCE_URLS.b,'source-c':SOURCE_URLS.c};for(const r of items){routes[r.linkKey]=r.url;r.resources.forEach((link,i)=>routes[r.linkKey+'-resource-'+i]=link.url);}return routes;}
 async function fetchSource(url,asText=false,headers={}){const response=await fetch(url,{headers:{accept:asText?'text/html':'application/json',...headers},signal:AbortSignal.timeout(20000)});if(!response.ok)throw Error('来源返回 HTTP '+response.status);return asText?response.text():response.json();}
 async function fetchSourceSnapshot(source,previous=[]){const fetchedAt=new Date().toISOString();
- if(source==='a'){const [raw,reviews]=await Promise.all([fetchSource(SOURCE_URLS.a+'data.json'),fetchSource('https://api.cloudofflower.ccwu.cc/reviews').catch(()=>null)]);const ratingsReady=Array.isArray(reviews?.reviews)&&reviews.ready;return {records:await normalizeFlower(raw,reviews,fetchedAt,previous),warning:ratingsReady?(reviews.stale?'评分暂不可用（实时同步）：当前展示原站缓存评分':null):'评分暂不可用（接口）：已使用原站目录评分或保留上次评分',successAt:fetchedAt,sourceUpdatedAt:raw.generated};}
+ if(source==='a'){const [raw,reviews,tagData]=await Promise.all([fetchSource(SOURCE_URLS.a+'data.json'),fetchSource('https://api.cloudofflower.ccwu.cc/reviews').catch(()=>null),fetchSource('https://api.cloudofflower.ccwu.cc/tags').catch(()=>null)]);const ratingsReady=Array.isArray(reviews?.reviews)&&reviews.ready;return {records:await normalizeFlower(raw,reviews,fetchedAt,previous,tagData),warning:[ratingsReady?(reviews.stale?'评分暂不可用（实时同步）：当前展示原站缓存评分':null):'评分暂不可用（接口）：已使用原站目录评分或保留上次评分',Array.isArray(tagData?.tags)&&Array.isArray(tagData?.options)?null:'标签暂不可用：保留已有标签，接口恢复后自动补充'].filter(Boolean).join('；')||null,successAt:fetchedAt,sourceUpdatedAt:raw.generated};}
  if(source==='b'){const raw=await fetchSource(SOURCE_URLS.b+'api/select?table=drama_library&id=main');if(raw.error||!Array.isArray(raw.data?.data))throw Error('来源数据未准备好');return {records:normalizeSweet(raw.data.data,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:raw.data.updated_at};}
  const [raw,stats]=await Promise.all([fetchSource(SOURCE_URLS.c+'api/dramas'),fetchSource(SOURCE_URLS.c+'api/stats?all=1')]);return {records:normalizeCat(raw,stats,fetchedAt),successAt:fetchedAt,sourceUpdatedAt:null};
 }

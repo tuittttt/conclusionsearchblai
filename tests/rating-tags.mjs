@@ -1,0 +1,17 @@
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+const els={},element=()=>({value:'',innerHTML:'',textContent:'',setAttribute(){},addEventListener(){}});
+const ctx={document:{querySelector:k=>els[k]??=element(),querySelectorAll:()=>[],addEventListener(){}},localStorage:{getItem:()=>null},fetch:()=>new Promise(()=>{})};vm.createContext(ctx);vm.runInContext(fs.readFileSync('app.js','utf8'),ctx);
+const a={id:'a',autoGroup:'same',source:'a',date:'2026-11-28',type:'AI剧',tags:['甜宠'],score:[4.5,10],title:'测试甲',en:'',aliases:[],resources:[],linkKey:'a'},b={...a,id:'b',source:'b',tags:['虐恋'],score:[3,2]},unrated={...a,id:'new',autoGroup:'new',title:'无评分剧',score:null};ctx.fixture=[a,b,unrated];vm.runInContext('data=fixture;populateTags()',ctx);
+assert.ok(els['#tag-filter'].innerHTML.includes('甜宠'));assert.ok(els['#tag-filter'].innerHTML.includes('虐恋'));
+els['#min-rating'].value='4.5';els['#tag-filter'].value='甜宠';vm.runInContext('render()',ctx);assert.ok(els['#result'].innerHTML.includes('测试甲'));assert.ok(!els['#result'].innerHTML.includes('无评分剧'));assert.ok(els['#result'].innerHTML.includes('drama-tag'));
+els['#tag-filter'].value='虐恋';vm.runInContext('render()',ctx);assert.ok(els['#result'].innerHTML.includes('没有匹配'),'score from a cannot satisfy tag from b');
+els['#source-filter'].value='b';els['#tag-filter'].value='';vm.runInContext('render()',ctx);assert.ok(els['#result'].innerHTML.includes('没有匹配'),'selected source score only');
+els['#clear-filters'].onclick();assert.equal(els['#min-rating'].value,'');assert.equal(els['#tag-filter'].value,'');assert.ok(els['#result'].innerHTML.includes('无评分剧'));
+const worker=fs.readFileSync('worker/catalog.js','utf8');const {normalizeFlower,normalizeSweet,normalizeCat}=await import('data:text/javascript;base64,'+Buffer.from("async function digest(){return 'id';}\n"+worker+'\nexport {normalizeFlower,normalizeSweet,normalizeCat};').toString('base64'));
+const raw={items:[{title:'标签测试'}]},previous=[{sourceTitle:'标签测试',tags:['旧标签']}];
+assert.deepEqual((await normalizeFlower(raw,null,'now',previous,{options:['甜宠'],tags:[{drama:'标签测试',tag:'甜宠',count:3},{drama:'标签测试',tag:'未选标签',count:0}]}))[0].tags,['甜宠']);
+assert.deepEqual((await normalizeFlower(raw,null,'now',previous,null))[0].tags,['旧标签']);
+assert.deepEqual((await normalizeFlower(raw,null,'now',previous,{options:[],tags:[]}))[0].tags,[]);
+assert.deepEqual(normalizeSweet([{id:'x',title:'x',tags:['BL'],styles:['甜宠']}],'now')[0].tags,['BL','甜宠']);
+assert.deepEqual(normalizeCat({ok:true,items:[{id:1,name:'x',genre:'bl',tags:['校园'],hiddenTags:['隐藏']} ]},{ok:true,stats:{}},'now')[0].tags,['bl','校园']);
+console.log('PASS: inclusive score filter, unrated exclusion, same-record tag/source matching, clear filters, source tags, tag outage preservation and recovery');
