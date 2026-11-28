@@ -22,17 +22,18 @@ const browser=()=>({cookie:''});
 async function call(who,url,body){const headers={origin:base};if(who.cookie)headers.cookie=who.cookie;if(body)headers['content-type']='application/json';const r=await worker.fetch(new Request(base+url,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined}),env);const set=r.headers.get('set-cookie');if(set)who.cookie=set.split(';')[0];return {status:r.status,body:await r.json()};}
 try{
 const one=browser();await call(one,'/api/aliases');
-let r=await call(one,'/api/aliases',{kind:'alias',left_id:'ceo',alias_name:'测试：总裁男仆新译名',reason:'测试证据：英文名与主要角色均一致。'});assert.equal(r.status,200);let proposal=r.body.proposals[0];const aliasId=proposal.id;assert.equal(proposal.votes,1);assert.equal(proposal.approved,false);
+let r=await call(one,'/api/aliases',{kind:'alias',left_id:'ceo',alias_name:'测试：总裁男仆新译名'});assert.equal(r.status,200);let proposal=r.body.proposals[0];const aliasId=proposal.id;assert.equal(proposal.votes,1);assert.equal(proposal.approved,false);
 for(let i=0;i<3;i++)r=await call(one,'/api/aliases/vote',{id:aliasId});assert.equal(r.body.proposals[0].votes,1,'same browser deduplicated');
 const atOne=r.body.proposals;
 r=await call(browser(),'/api/aliases/vote',{id:aliasId});assert.equal(r.body.proposals[0].votes,2);assert.equal(r.body.proposals[0].approved,true,'two approves');const approvedAlias=r.body.proposals;
 const duplicate=await call(one,'/api/aliases',{kind:'alias',left_id:'ceo',alias_name:'测试：总裁男仆新译名',reason:'再次提交相同的译名不得创建新提议。'});assert.equal(duplicate.body.proposals.length,1);assert.equal(duplicate.body.proposals[0].votes,2);
-r=await call(one,'/api/aliases',{kind:'merge',left_id:'ceo',right_id:'agent',reason:'仅本地自动化测试，不会提交至线上。'});const merge=r.body.proposals.find(p=>p.kind==='merge');
+r=await call(one,'/api/aliases',{kind:'merge',left_id:'ceo',right_id:'agent',reason:'同剧'});const merge=r.body.proposals.find(p=>p.kind==='merge');
 await call(one,'/api/aliases',{kind:'merge',left_id:'agent',right_id:'ceo',reason:'反向选择应复用同一条合并提议。'});
 for(let i=0;i<1;i++)r=await call(browser(),'/api/aliases/vote',{id:merge.id});assert.equal(r.body.proposals.filter(p=>p.kind==='merge').length,1);assert.equal(r.body.proposals.find(p=>p.id===merge.id).approved,true);
 assert.equal((await call(one,'/api/aliases',{kind:'merge',left_id:'ceo',right_id:'ceo',reason:'不能与自己合并同一条剧集记录。'})).status,400);
 assert.equal((await call(one,'/api/aliases',{kind:'alias',left_id:'ceo',alias_name:'与我的危险经纪人签约',reason:'已经存在的另一条记录应该走合并。'})).status,409);
 assert.equal((await call(one,'/api/aliases',{kind:'alias',left_id:'missing',alias_name:'some name',reason:'不存在的记录不能被用户提交合并。'})).status,400);
+assert.equal((await call(browser(),'/api/aliases',{kind:'merge',left_id:'ceo',right_id:'agent',reason:'长'.repeat(501)})).status,400);
 const forged=await worker.fetch(new Request(base+'/api/aliases',{method:'POST',headers:{origin:'https://evil.test','content-type':'application/json'},body:'{}'}),env);assert.equal(forged.status,403);
 const els={};const element=()=>({value:'',innerHTML:'',textContent:'',setAttribute(){},addEventListener(){}});const context={document:{querySelector:k=>els[k]??=(element()),querySelectorAll:()=>[],addEventListener(){}},localStorage:{getItem:()=>null},fetch:()=>new Promise(()=>{})};vm.createContext(context);vm.runInContext(fs.readFileSync('app.js','utf8'),context);context.fixtureRecords=JSON.parse(fs.readFileSync('catalog.json','utf8')).filter(r=>['ceo','agent','c-2400','c-2382'].includes(r.id));vm.runInContext('data=fixtureRecords',context);
 context.fixture=atOne;vm.runInContext('proposals=fixture;render()',context);assert.ok(els['#result'].innerHTML.includes('本剧的别名 / 合并提议'));assert.ok(els['#result'].innerHTML.includes('data-vote='));

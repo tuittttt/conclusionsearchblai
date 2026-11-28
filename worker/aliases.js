@@ -32,7 +32,7 @@ async function aliasEndpoint(request,env){
    const {kind,left_id,right_id}=body;
    if(!['alias','merge'].includes(kind)||!CATALOG.some(d=>d.id===left_id))return reply({error:'请选择有效的剧集'},400);
    const reason=typeof body.reason==='string'?body.reason.trim():'';
-   if(reason.length<8||reason.length>500)return reply({error:'请填写 8～500 字的依据，例如英文名、主演或原站信息'},400);
+   if(reason.length>500)return reply({error:'依据最多填写 500 字'},400);
    let left=left_id,right=null,alias=null,key;
    if(kind==='merge'){
     if(left_id===right_id||!CATALOG.some(d=>d.id===right_id)||CATALOG.find(d=>d.id===left_id)?.autoGroup===CATALOG.find(d=>d.id===right_id)?.autoGroup)return reply({error:'请选择另一条不同的剧集记录'},400);
